@@ -7,11 +7,28 @@ interface NewsCardProps {
   key?: React.Key;
   story: NewsStory;
   isExpandedInitial?: boolean;
+  onBack?: () => void;
+  onSelect?: () => void;
 }
 
-export function NewsCard({ story, isExpandedInitial = false }: NewsCardProps) {
+export function NewsCard({ story, isExpandedInitial = false, onBack, onSelect }: NewsCardProps) {
   const [isExpanded, setIsExpanded] = useState(isExpandedInitial);
   const [activeDeNoiserPublisher, setActiveDeNoiserPublisher] = useState<string | null>(null);
+
+  // Sync state if initial prop changes
+  React.useEffect(() => {
+    setIsExpanded(isExpandedInitial);
+  }, [isExpandedInitial]);
+
+  const handleBack = () => {
+    setIsExpanded(false);
+    if (onBack) onBack();
+  };
+
+  const handleCardClick = () => {
+    setIsExpanded(true);
+    if (onSelect) onSelect();
+  };
 
   const toggleDeNoiser = (publisherSource: string) => {
     if (activeDeNoiserPublisher === publisherSource) {
@@ -25,7 +42,7 @@ export function NewsCard({ story, isExpandedInitial = false }: NewsCardProps) {
   if (!isExpanded) {
     return (
       <div 
-        onClick={() => setIsExpanded(true)}
+        onClick={handleCardClick}
         className="group bg-white border border-stone-200/80 rounded-[28px] p-6 cursor-pointer hover:border-stone-400 hover:shadow-md transition-all duration-300 text-left select-none flex flex-col gap-4"
       >
         <div className="flex items-center justify-between font-mono text-[9px] tracking-widest uppercase text-stone-500 font-bold">
@@ -47,20 +64,20 @@ export function NewsCard({ story, isExpandedInitial = false }: NewsCardProps) {
         </div>
 
         <div>
-          <h3 className="font-serif text-stone-950 text-lg sm:text-xl font-bold tracking-tight leading-snug group-hover:text-indigo-600 transition-colors duration-200 mb-2">
+          <h3 className="font-serif text-stone-950 text-lg sm:text-xl font-bold tracking-tight leading-snug group-hover:text-indigo-600 transition-colors duration-200 mb-2.5">
             {story.title}
           </h3>
-          <p className="text-stone-600 text-xs font-sans leading-relaxed line-clamp-3">
+          <p className="text-stone-700 text-sm font-sans leading-relaxed">
             {story.description}
           </p>
         </div>
 
         {/* Verifiable Consensus Preview Pill */}
-        <div className="bg-[#ECFDF5] border border-emerald-200/80 p-3.5 rounded-2xl text-xs font-sans text-emerald-950 flex items-start gap-2.5">
+        <div className="bg-[#ECFDF5] border border-emerald-200/80 p-4 rounded-2xl text-xs sm:text-sm font-sans text-emerald-950 flex items-start gap-3">
           <ShieldCheck className="h-4 w-4 text-[#047857] flex-shrink-0 mt-0.5" />
-          <div className="line-clamp-2">
-            <span className="font-mono text-[9px] font-extrabold uppercase tracking-wider text-[#047857] block mb-0.5">
-              VERIFIABLE CONSENSUS:
+          <div className="line-clamp-3">
+            <span className="font-mono text-[9px] font-extrabold uppercase tracking-wider text-[#047857] block mb-1">
+              VERIFIABLE CONSENSUS PREVIEW:
             </span>
             {story.verifiableConsensus}
           </div>
@@ -83,28 +100,50 @@ export function NewsCard({ story, isExpandedInitial = false }: NewsCardProps) {
       {/* Back Button Navigation Row */}
       <div className="flex items-center justify-between">
         <button 
-          onClick={() => setIsExpanded(false)}
+          onClick={handleBack}
           className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-stone-100 border border-stone-200 text-stone-800 rounded-full font-mono text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer shadow-3xs"
         >
           <ArrowLeft className="h-3.5 w-3.5 text-stone-900" />
           <span>Back to Feed</span>
         </button>
+
+        <div className="flex items-center gap-2 font-mono text-[9px] text-stone-500 font-bold uppercase">
+          <span className="bg-stone-100 text-stone-800 px-2.5 py-1 rounded border border-stone-200">
+            {story.category}
+          </span>
+          <span>{story.date}</span>
+        </div>
+      </div>
+
+      {/* Story Master Title Header */}
+      <div className="bg-white border border-stone-200/80 rounded-[28px] p-6 sm:p-8 space-y-3 shadow-2xs">
+        <div className="font-mono text-[10px] font-extrabold tracking-widest text-stone-400 uppercase">
+          STORY INTELLIGENCE &bull; {story.perspectives.length} NEWSROOMS AUDITED
+        </div>
+        <h2 className="font-serif text-2xl sm:text-3xl font-black text-stone-950 leading-tight">
+          {story.title}
+        </h2>
+        <p className="text-stone-700 text-sm sm:text-base font-sans leading-relaxed pt-1">
+          {story.description}
+        </p>
       </div>
 
       {/* CARD 1: VERIFIABLE CONSENSUS */}
-      <div className="bg-[#ECFDF5] border border-emerald-100 rounded-[28px] p-6 sm:p-8 space-y-3 shadow-2xs">
-        <div className="font-mono text-[11px] font-extrabold tracking-widest text-[#047857] uppercase">
-          VERIFIABLE CONSENSUS
+      <div className="bg-[#ECFDF5] border border-emerald-200/80 rounded-[28px] p-6 sm:p-8 space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-extrabold tracking-widest text-[#047857] uppercase">
+          <ShieldCheck className="h-4 w-4 text-[#047857]" />
+          <span>VERIFIABLE CONSENSUS</span>
         </div>
-        <p className="font-serif font-extrabold text-[#064E3B] text-base sm:text-lg leading-relaxed">
+        <p className="font-serif text-[#064E3B] text-base sm:text-lg leading-relaxed font-medium">
           {story.verifiableConsensus}
         </p>
       </div>
 
       {/* CARD 2: NARRATIVE LANDSCAPE */}
-      <div className="bg-[#EEF2FF] border border-indigo-100 rounded-[28px] p-6 sm:p-8 space-y-3 shadow-2xs">
-        <div className="font-mono text-[11px] font-extrabold tracking-widest text-[#4338CA] uppercase">
-          NARRATIVE LANDSCAPE
+      <div className="bg-[#EEF2FF] border border-indigo-200/80 rounded-[28px] p-6 sm:p-8 space-y-3 shadow-2xs">
+        <div className="flex items-center gap-2 font-mono text-[11px] font-extrabold tracking-widest text-[#4338CA] uppercase">
+          <Sparkles className="h-4 w-4 text-[#4338CA]" />
+          <span>NARRATIVE LANDSCAPE</span>
         </div>
         <p className="font-serif text-[#1E1B4B] text-sm sm:text-base leading-relaxed font-normal">
           {story.narrativeLandscape}
@@ -116,7 +155,7 @@ export function NewsCard({ story, isExpandedInitial = false }: NewsCardProps) {
         <div className="grid grid-cols-1 gap-6">
           {story.perspectives.map((perspective, idx) => {
             const isDeNoiserOpen = activeDeNoiserPublisher === perspective.source;
-            const integrity = perspective.sourceIntegrity || (perspective.reliability === "canonical" ? "Canonical" : "High");
+            const integrity = perspective.sourceIntegrity || (perspective.reliability === "high" ? "Canonical" : "Audited");
             
             return (
               <div 
@@ -291,16 +330,16 @@ export function NewsCard({ story, isExpandedInitial = false }: NewsCardProps) {
                   {/* Card Bottom Row */}
                   <div className="border-t border-stone-100 pt-4 flex items-center justify-between font-mono text-[10px] text-stone-400">
                     <a 
-                      href={`/api/redirect-link?url=${encodeURIComponent(perspective.url)}&headline=${encodeURIComponent(perspective.title)}&source=${encodeURIComponent(perspective.source)}`}
+                      href={perspective.url && perspective.url.startsWith("http") ? perspective.url : `/api/redirect-link?url=${encodeURIComponent(perspective.url)}&headline=${encodeURIComponent(perspective.title)}&source=${encodeURIComponent(perspective.source)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      referrerPolicy="no-referrer"
-                      className="font-extrabold text-[#4F46E5] hover:text-indigo-800 flex items-center gap-1 uppercase tracking-wider"
+                      className="font-extrabold text-[#4F46E5] hover:text-indigo-900 inline-flex items-center gap-1.5 uppercase tracking-wider py-1 px-3 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors cursor-pointer"
                     >
-                      READ DIRECT STORY <ExternalLink className="h-3.5 w-3.5" />
+                      <span>READ DIRECT STORY</span>
+                      <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                     <span className="text-stone-400 uppercase tracking-widest font-bold">
-                      VERIFIED PERMALINK
+                      VERIFIED DIRECT STORY LINK
                     </span>
                   </div>
 

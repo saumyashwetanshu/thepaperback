@@ -7,7 +7,7 @@ import { PulseDesk } from "./components/PulseDesk";
 import { RegionalJournalism } from "./components/RegionalJournalism";
 import { Methodology } from "./components/Methodology";
 import { NewsStory, LiveWireItem } from "./types";
-import { FALLBACK_STORIES, FALLBACK_WIRE } from "./data/fallbackNews";
+import { FALLBACK_STORIES, FALLBACK_WIRE, findOrCreateStory } from "./data/fallbackNews";
 import { Search, Newspaper } from "lucide-react";
 
 export default function App() {
@@ -19,7 +19,7 @@ export default function App() {
   // Advanced Filtering States
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
-  const [, setSelectedStory] = useState<NewsStory | null>(null);
+  const [selectedStory, setSelectedStory] = useState<NewsStory | null>(null);
 
   // Load news feed from server or fallback
   const loadNewsFeed = async (query?: string) => {
@@ -48,27 +48,27 @@ export default function App() {
     loadNewsFeed();
   }, []);
 
-  // Live query search triggering
-  useEffect(() => {
-    const trimmed = searchQuery.trim();
-    if (trimmed.length >= 2) {
-      const timer = setTimeout(() => {
-        loadNewsFeed(trimmed);
-      }, 500);
-      return () => clearTimeout(timer);
-    } else if (trimmed.length === 0) {
-      loadNewsFeed();
-    }
-  }, [searchQuery]);
+  const handleSearchCompare = (term: string) => {
+    if (!term.trim()) return;
+    const target = findOrCreateStory(term, stories);
+    setSelectedStory(target);
+    setActiveTab("feed");
+    setTimeout(() => {
+      document.getElementById("story-intelligence-section")?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+  };
 
   const handleWireItemClick = (item: LiveWireItem) => {
     const matchingStory = stories.find(s => 
       s.id === item.relatedStoryId || 
       s.title.toLowerCase().includes(item.title.toLowerCase().substring(0, 15))
-    ) || stories[0];
+    ) || findOrCreateStory(item.relatedStoryId || item.title, stories);
 
     setSelectedStory(matchingStory);
-    window.scrollTo({ top: 400, behavior: "smooth" });
+    setActiveTab("feed");
+    setTimeout(() => {
+      document.getElementById("story-intelligence-section")?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
   };
 
   // Category filter
@@ -117,25 +117,62 @@ export default function App() {
                 India's constitutional story intelligence platform. Deconstructing selective reporting, narrative diction, and institutional framing.
               </p>
 
-              {/* SEARCH OVAL BAR */}
-              <div className="w-full max-w-2xl mx-auto pt-2">
-                <div className="relative flex items-center bg-white rounded-full p-2 border border-stone-300 shadow-xs hover:border-stone-500 transition-all">
+              {/* SEARCH / COMPARE OVAL BAR */}
+              <div className="w-full max-w-2xl mx-auto pt-2 space-y-3">
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (searchQuery.trim()) {
+                      handleSearchCompare(searchQuery);
+                    }
+                  }}
+                  className="relative flex items-center bg-white rounded-full p-2 border border-stone-300 shadow-xs hover:border-stone-500 transition-all focus-within:border-stone-800 focus-within:ring-2 focus-within:ring-stone-200"
+                >
                   <span className="absolute left-5 text-stone-500">
                     <Search className="h-4.5 w-4.5" />
                   </span>
                   <input
                     type="text"
-                    placeholder="Search people, institutions, laws, events, or topics (e.g. Modi, CJI, UPSC, Bihar, India-China, RBI)..."
+                    placeholder="Search people, institutions, laws, events, or topics to compare..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-12 pr-28 py-3 text-xs sm:text-sm font-sans text-stone-950 bg-transparent rounded-full focus:outline-none placeholder-stone-400 font-medium"
                   />
                   <button
-                    onClick={() => loadNewsFeed(searchQuery)}
+                    type="submit"
                     className="absolute right-2.5 top-2 px-6 py-2.5 bg-[#18181B] text-white font-mono text-[10px] tracking-widest font-black uppercase rounded-full hover:bg-stone-800 transition-all cursor-pointer shadow-3xs active:scale-98"
                   >
-                    SEARCH
+                    COMPARE
                   </button>
+                </form>
+
+                {/* Trending Comparison Shortcut Tags */}
+                <div className="flex flex-wrap items-center justify-center gap-1.5 font-mono text-[10px] text-stone-500">
+                  <span className="font-extrabold uppercase tracking-widest text-[9px] text-stone-400 mr-1">
+                    POPULAR COMPARISONS:
+                  </span>
+                  {[
+                    "RBI Dividend",
+                    "India GDP",
+                    "Article 39(b)",
+                    "Wayanad Rehab",
+                    "Chip Design",
+                    "Middle East Oil",
+                    "Exam Reforms",
+                    "Sovereign Bonds"
+                  ].map((topic) => (
+                    <button
+                      key={topic}
+                      type="button"
+                      onClick={() => {
+                        setSearchQuery(topic);
+                        handleSearchCompare(topic);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-stone-100 border border-stone-200 rounded-full font-bold text-stone-700 hover:text-stone-950 transition-colors cursor-pointer text-[9px]"
+                    >
+                      {topic}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -144,9 +181,9 @@ export default function App() {
             <LiveWire items={wire} onSelectWireItem={handleWireItemClick} />
 
             {/* SECTION 2: TODAY'S STORY INTELLIGENCE */}
-            <div className="space-y-6">
+            <div id="story-intelligence-section" className="space-y-6 scroll-mt-24">
               
-              {/* Category Filter Pills */}
+              {/* Category Filter Pills & Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-stone-200 pb-4 gap-4">
                 <div className="flex items-center gap-2">
                   <Newspaper className="h-5 w-5 text-stone-900" />
@@ -155,25 +192,49 @@ export default function App() {
                   </h2>
                 </div>
 
-                <div className="flex overflow-x-auto no-scrollbar gap-1.5 font-mono text-[10px] uppercase font-bold py-1">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
-                        selectedCategory === cat
-                          ? "bg-stone-950 text-white shadow-3xs font-black"
-                          : "bg-white hover:bg-stone-100 text-stone-700 border border-stone-200"
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
+                {!selectedStory && (
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    {searchQuery && (
+                      <button
+                        onClick={() => {
+                          setSearchQuery("");
+                          setSelectedCategory("All");
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-amber-100 text-amber-900 font-mono text-[9px] font-black uppercase hover:bg-amber-200 transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        CLEAR SEARCH &times;
+                      </button>
+                    )}
+                    <div className="flex overflow-x-auto no-scrollbar gap-1.5 font-mono text-[10px] uppercase font-bold py-1">
+                      {categories.map((cat) => (
+                        <button
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat)}
+                          className={`px-3.5 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                            selectedCategory === cat
+                              ? "bg-stone-950 text-white shadow-3xs font-black"
+                              : "bg-white hover:bg-stone-100 text-stone-700 border border-stone-200"
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Story Cards List */}
-              {isLoading && stories.length === 0 ? (
+              {/* Story Intelligence View */}
+              {selectedStory ? (
+                <div className="space-y-6 animate-fade-in">
+                  <NewsCard 
+                    key={selectedStory.id} 
+                    story={selectedStory} 
+                    isExpandedInitial={true}
+                    onBack={() => setSelectedStory(null)}
+                  />
+                </div>
+              ) : isLoading && stories.length === 0 ? (
                 <div className="py-20 text-center border border-stone-200 rounded-3xl bg-white flex flex-col items-center justify-center gap-3">
                   <span className="h-8 w-8 text-stone-900 border-2 border-stone-900 border-t-transparent rounded-full animate-spin"></span>
                   <p className="font-serif italic text-stone-600">Cross-referencing verified newsroom streams...</p>
@@ -181,7 +242,16 @@ export default function App() {
               ) : filteredStories.length > 0 ? (
                 <div className="space-y-6">
                   {filteredStories.map((story) => (
-                    <NewsCard key={story.id} story={story} />
+                    <NewsCard 
+                      key={story.id} 
+                      story={story} 
+                      onSelect={() => {
+                        setSelectedStory(story);
+                        setTimeout(() => {
+                          document.getElementById("story-intelligence-section")?.scrollIntoView({ behavior: "smooth" });
+                        }, 50);
+                      }}
+                    />
                   ))}
                 </div>
               ) : (
@@ -197,7 +267,9 @@ export default function App() {
               stories={stories} 
               onSelectStory={(story) => {
                 setSelectedStory(story);
-                window.scrollTo({ top: 400, behavior: "smooth" });
+                setTimeout(() => {
+                  document.getElementById("story-intelligence-section")?.scrollIntoView({ behavior: "smooth" });
+                }, 50);
               }} 
             />
 
@@ -211,7 +283,7 @@ export default function App() {
 
         {/* TAB 3: THE PULSE OBSERVATORY */}
         {activeTab === "pulse" && (
-          <PulseDesk />
+          <PulseDesk onSelectWireItem={handleWireItemClick} />
         )}
 
         {/* TAB 4: METHODOLOGY */}

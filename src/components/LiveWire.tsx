@@ -21,21 +21,21 @@ export function LiveWire({ items, onSelectWireItem }: LiveWireProps) {
       category: "INTERNATIONAL",
       title: "Persistent Middle East hostilities pose significant risk to global economic stability and Indian energy imports",
       colorClass: "bg-[#E6F4EA] text-[#137333]",
-      relatedStoryId: "gdp-growth-japan-surpass"
+      relatedStoryId: "wire-me-hostilities-energy"
     },
     {
       id: "wire-youth",
       category: "POLITICS",
       title: "Youth protests intensify over structural employment flaws and recurring national examination scandals",
       colorClass: "bg-[#E8F0FE] text-[#1A73E8]",
-      relatedStoryId: "sc-article-39b-property"
+      relatedStoryId: "wire-youth-exam-reforms"
     },
     {
       id: "wire-bonds",
       category: "ECONOMY",
       title: "Foreign investors pump record $4.2 billion into Indian government bonds following debt index inclusion",
       colorClass: "bg-[#E6F4EA] text-[#137333]",
-      relatedStoryId: "rbi-dividend-payout-2026"
+      relatedStoryId: "wire-bonds-debt-index"
     }
   ];
 
