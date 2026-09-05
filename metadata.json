@@ -1,0 +1,6 @@
+{
+  "name": "The Paperback",
+  "description": "The Paperback — India-First News Comparison and Editorial Intelligence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

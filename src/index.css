@@ -1,0 +1,131 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary: #000000;
+  --color-on-primary: #ffffff;
+  
+  --color-surface: #ffffff;
+  --color-on-surface: #000000;
+  
+  --color-surface-variant: #f8fafc;
+  --color-on-surface-variant: #475569;
+  
+  --color-surface-container: #ffffff;
+  --color-surface-container-low: #ffffff;
+  --color-surface-container-high: #f1f5f9;
+  --color-surface-container-highest: #e2e8f0;
+  
+  --color-outline: #cbd5e1;
+  --color-outline-variant: #e2e8f0;
+  
+  --color-error: #ef4444;
+  --color-on-error: #ffffff;
+
+  --color-secondary: #64748b;
+  --color-on-secondary: #ffffff;
+
+  --radius-default: 0.125rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.375rem;
+  --radius-2xl: 0.5rem;
+  --radius-3xl: 0.75rem;
+  --radius-full: 9999px;
+  
+  --spacing-margin-mobile: 24px;
+  --spacing-unit: 4px;
+  --spacing-editorial-stack: 40px;
+  --spacing-gutter: 24px;
+  --spacing-margin-desktop: 48px;
+  
+  --font-serif: 'Newsreader', Georgia, Cambria, 'Times New Roman', Times, serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-display-sm: 'Newsreader', Georgia, serif;
+  --font-body-lg: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  --font-display-lg: 'Newsreader', Georgia, serif;
+  --font-data-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-label-caps: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  --font-headline-sm: 'Newsreader', Georgia, serif;
+  --font-headline-md: 'Newsreader', Georgia, serif;
+  --font-body-md: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  
+  --text-display-sm: 32px;
+  --text-display-sm--line-height: 36px;
+  --text-display-sm--letter-spacing: -0.02em;
+  --text-display-sm--font-weight: 800;
+  
+  --text-body-lg: 19px;
+  --text-body-lg--line-height: 28px;
+  --text-body-lg--font-weight: 400;
+  
+  --text-display-lg: 56px;
+  --text-display-lg--line-height: 60px;
+  --text-display-lg--letter-spacing: -0.03em;
+  --text-display-lg--font-weight: 900;
+  
+  --text-data-mono: 13px;
+  --text-data-mono--line-height: 18px;
+  --text-data-mono--letter-spacing: 0.01em;
+  --text-data-mono--font-weight: 500;
+  
+  --text-label-caps: 13px;
+  --text-label-caps--line-height: 16px;
+  --text-label-caps--letter-spacing: 0.02em;
+  --text-label-caps--font-weight: 700;
+  
+  --text-headline-sm: 22px;
+  --text-headline-sm--line-height: 26px;
+  --text-headline-sm--font-weight: 800;
+  --text-headline-sm--letter-spacing: -0.01em;
+  
+  --text-headline-md: 28px;
+  --text-headline-md--line-height: 32px;
+  --text-headline-md--font-weight: 800;
+  --text-headline-md--letter-spacing: -0.015em;
+  
+  --text-body-md: 17px;
+  --text-body-md--line-height: 24px;
+  --text-body-md--font-weight: 400;
+}
+
+@layer base {
+  html.dark {
+    --color-primary: #ffffff;
+    --color-on-primary: #000000;
+    
+    --color-surface: #000000;
+    --color-on-surface: #ffffff;
+    
+    --color-surface-variant: #121214;
+    --color-on-surface-variant: #a1a1aa;
+    
+    --color-surface-container: #09090b;
+    --color-surface-container-low: #000000;
+    --color-surface-container-high: #18181b;
+    --color-surface-container-highest: #27272a;
+    
+    --color-outline: #27272a;
+    --color-outline-variant: #18181b;
+  }
+
+  body {
+    background-color: var(--color-surface, #ffffff);
+    color: var(--color-on-surface, #000000);
+    font-family: var(--font-body-md, -apple-system, "SF Pro Text", "Inter", sans-serif);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+
+  .material-symbols-outlined {
+    font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24;
+  }
+}
+
