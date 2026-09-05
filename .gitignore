@@ -5,17 +5,22 @@ coverage/
 .DS_Store
 *.log
 .env
-.env.local
-.env.production
+.env.*
 !.env.example
-.data/*.db-wal
-.data/*.db-shm
+.data/
 temp/
-
-# Root temporary scratch artifacts
 *.sqlite
 local.db
 thepaperback.db
+database.sqlite
+paperback.sqlite
+*.pem
+*.key
+secrets/
+.secret*
+serviceAccount*.json
+*-firebase-adminsdk*.json
+
 /*.txt
 /*.cjs
 /*.py
@@ -23,4 +28,5 @@ thepaperback.db
 /*.mjs
 /scratch/
 /scratch_repos/
-
+.agents/
+.vscode/
