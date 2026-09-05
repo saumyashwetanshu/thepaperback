@@ -48,6 +48,8 @@ if (!isMainThread) {
 } else {
   // --- MAIN THREAD LOGIC ---
   const app = express();
+  // Cloud Run sits behind a reverse proxy; required for express-rate-limit IP keying
+  app.set("trust proxy", 1);
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
@@ -67,6 +69,8 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
     max: 2000, // allow up to 2000 requests per 15 minutes for normal browsing/SSE
     standardHeaders: true,
     legacyHeaders: false,
+    // Cloud Run / X-Forwarded-For: skip permissive validation that throws ValidationError
+    validate: false,
   });
 
   // Apply rate limiting to all requests
@@ -74,8 +78,8 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
   /**
    * Live RSS background ingestion toggle:
-   * - DISABLE_BACKGROUND_INGESTION=true  → always off (wins)
-   * - ENABLE_BACKGROUND_INGESTION=true   → always on
+   * - DISABLE_BACKGROUND_INGESTION=true  â†’ always off (wins)
+   * - ENABLE_BACKGROUND_INGESTION=true   â†’ always on
    * - otherwise: ON by default in non-production (local/dev) so Home stays fresh
    * Documented in .env.example
    */
@@ -149,11 +153,26 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
   async function startServer() {
     await initDb();
 
+    // One-shot ingest on boot when stories table is empty (seed/.data may be missing on fresh revisions)
+    let storyCount = 0;
+    try {
+      const db = await initDb();
+      const row = await db.get("SELECT COUNT(*) as c FROM stories");
+      storyCount = Number(row?.c || 0);
+    } catch (e) {
+      console.warn("Boot story count check failed:", e);
+    }
+
     // Spawn background worker for live RSS (default-on for local/dev; see shouldEnableBackgroundIngestion)
     if (shouldEnableBackgroundIngestion()) {
       console.log("Background news ingestion worker ENABLED (set DISABLE_BACKGROUND_INGESTION=true to turn off; ENABLE_BACKGROUND_INGESTION=true forces on).");
-      setTimeout(spawnNewsWorker, 5000);
+      const delayMs = storyCount === 0 ? 0 : 5000;
+      console.log("Boot: stories=" + storyCount + "; scheduling first ingest in " + delayMs + "ms");
+      setTimeout(spawnNewsWorker, delayMs);
       setInterval(spawnNewsWorker, 2 * 60 * 60 * 1000);
+    } else if (storyCount === 0) {
+      console.log("Boot: DB empty and background ingestion disabled â€” running one-shot ingest anyway.");
+      setTimeout(spawnNewsWorker, 0);
     } else {
       console.log("Background news ingestion worker disabled. Set ENABLE_BACKGROUND_INGESTION=true to enable live RSS polling (or unset DISABLE_BACKGROUND_INGESTION / run non-production for default-on).");
     }

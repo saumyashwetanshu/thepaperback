@@ -1,58 +1,87 @@
 # The Paperback
 
-AI-powered media intelligence for Indian news — multi-source clustering, consensus facts, and editorial framing analysis with **Google Gemini**.
+India multi-desk news intelligence — extract honest coverage excerpts, cluster related stories with local MiniLM embeddings + NER, and explore framing with **Google Gemini** on **Cloud Run**.
 
-> **Live app:** https://thepaperback-j564xim25a-el.a.run.app  
-> **Cloud Run label (exact):** `dev-tutorial=cloud-run-ai-challenge`  
+> **Live app:** https://thepaperback-j564xim25a-el.a.run.app
+> **Cloud Run label (exact):** `dev-tutorial=cloud-run-ai-challenge`
 > **Track:** Google Cloud | Hack2skill Gen AI Academy — APAC Edition
 
-## What it is
+## What it is (honest product)
 
-**The Paperback** helps readers see past single-outlet spin. It ingests coverage across diverse Indian news desks, groups related stories with local NLP embeddings, isolates corroborated consensus facts, and surfaces framing differences via Gemini — so you can compare how outlets tell the same story.
+**The Paperback** is **not** a Ground News clone and does **not** claim "corroborated facts" as verified truth.
+
+It helps readers compare how Indian outlets cover the same events by:
+
+1. **Ingesting** multi-desk RSS / HTML sources
+2. **Extracting** article text with an honest status ladder: `EXTRACTED` / `PARTIAL` / `PAYWALLED`
+3. **Clustering** related coverage with **Xenova MiniLM** embeddings
+4. **Tagging** people/orgs/places with token-classification **NER**
+5. **Surfacing** framing differences and multi-turn dossier chat via **Gemini**, grounded on **EXTRACTED** excerpts only (with a documented model fallback ladder)
 
 ## Stack
 
-- **Frontend:** React, TypeScript, Vite, Tailwind
-- **Backend:** Node.js / Express (`server.ts` + `src/server/`)
-- **Auth & data:** Firebase Auth + Cloud Firestore (`firestore.rules` in repo root)
-- **AI:** Google Gemini (`@google/genai`), production keys via **Secret Manager**
-- **Deploy:** Google Cloud Run (Docker / `--source`)
+| Layer | Tech |
+|--------|------|
+| Frontend | React, TypeScript, Vite, Tailwind |
+| Backend | Node.js / Express (`server.ts` + `src/server/`) |
+| Auth & data | **Firebase Auth** (Google Sign-In) + **Cloud Firestore** (`firestore.rules`) |
+| AI | Google Gemini (`@google/genai`); production keys via **Secret Manager** |
+| NLP (local) | Xenova MiniLM embeddings + transformers NER |
+| Deploy | **Google Cloud Run** (Docker) |
 
 ## Firebase Auth & Firestore
 
-Client Firebase config uses `VITE_FIREBASE_*` env vars (see `.env.example`).
-Security rules live in **`firestore.rules`** at the repository root:
+- Client config: `VITE_FIREBASE_*` (see `.env.example`)
+- Primary auth: **Google Sign-In** via Firebase Auth
+- Rules in repo root `firestore.rules`:
+  - User profiles / bookmarks / history / `dossier_chats`: authenticated, **uid-scoped** writes
+  - Stories / dossiers: **public read**; client writes denied (server / Cloud Run only)
 
-- User profiles / bookmarks / history: authenticated, uid-scoped writes
-- Stories / dossiers: public read; client writes denied (server / Cloud Run only)
-
-Deploy rules with your Firebase project when you change them (`firebase deploy --only firestore:rules`).
+```bash
+firebase deploy --only firestore:rules
+```
 
 ## Gemini + Secret Manager
 
-Do **not** commit API keys. Locally, copy `.env.example` to `.env` and set `GEMINI_API_KEY`.
+Do **not** commit API keys. Locally, copy `.env.example` → `.env` and set `GEMINI_API_KEY`.
 
-On Cloud Run, store the key in Secret Manager and mount it at deploy time with `--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest`.
+On Cloud Run, store the key in Secret Manager and mount it:
 
-Grant the Cloud Run runtime service account `roles/secretmanager.secretAccessor` on the secret.
+```bash
+echo -n "YOUR_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=-
+# Grant Cloud Run runtime SA: roles/secretmanager.secretAccessor
+```
 
-Example secret create:
-
-    echo -n "YOUR_KEY" | gcloud secrets create GEMINI_API_KEY --data-file=-
+Deploy with `--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest`.
 
 ## Cloud Run deploy
 
-Service label must be exactly: `dev-tutorial=cloud-run-ai-challenge`
+**Required label (exact key=value):** `dev-tutorial=cloud-run-ai-challenge`
 
-Use Cloud Run source deploy in asia-south1, unauthenticated, secret mount GEMINI_API_KEY=GEMINI_API_KEY:latest, env NODE_ENV=production,DISABLE_BACKGROUND_INGESTION=true, labels=dev-tutorial=cloud-run-ai-challenge, memory 2Gi, cpu 1.
+Use **asia-south1**, allow unauthenticated, mount the Gemini secret, and **enable** live RSS background ingestion in production.
+
+Example (single line):
+
+```
+gcloud run deploy thepaperback --source . --region asia-south1 --allow-unauthenticated --memory 2Gi --cpu 1 --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest --set-env-vars=NODE_ENV=production,ENABLE_BACKGROUND_INGESTION=true --update-labels=dev-tutorial=cloud-run-ai-challenge
+```
+
+> Set `ENABLE_BACKGROUND_INGESTION=true` so Home rails stay fresh. Do **not** set `DISABLE_BACKGROUND_INGESTION=true` for the challenge deploy.
 
 **Live URL:** https://thepaperback-j564xim25a-el.a.run.app
 
 ## Local setup
-Clone https://github.com/saumyashwetanshu/thepaperback.git then install dependencies.
-Then install packages and start locally.
 
-## Repo notes
-- Ignore .env node_modules .data dist; do not commit secrets
+1. Clone `https://github.com/saumyashwetanshu/thepaperback.git`
+2. Copy `.env.example` to `.env` and set `GEMINI_API_KEY` plus `VITE_FIREBASE_*`
+3. Run `npm ci` then `npm run dev`
+4. Optional: `docker compose up --build`
+
+## Repo hygiene
+- Never commit env secrets data node_modules or huge dist
 - See firestore.rules for Auth and Firestore policy
-- Form needs BOTH GitHub repo URL and Cloud Run live URL
+- SUBMISSION_BRIEF.txt is the short challenge blurb
+- Challenge form needs both GitHub URL and Cloud Run URL
+
+## License
+MIT - see LICENSE

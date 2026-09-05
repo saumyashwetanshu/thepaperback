@@ -21,7 +21,6 @@ secrets/
 serviceAccount*.json
 *-firebase-adminsdk*.json
 
-/*.txt
 /*.cjs
 /*.py
 /*.js
@@ -30,3 +29,7 @@ serviceAccount*.json
 /scratch_repos/
 .agents/
 .vscode/
+
+# Allow challenge brief; ignore other root scratch txt
+/*.txt
+!SUBMISSION_BRIEF.txt
