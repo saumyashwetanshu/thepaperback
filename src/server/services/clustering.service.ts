@@ -1,4 +1,4 @@
-﻿// Clustering prefers full EXTRACTED bodies + MiniLM embeddings (embed.minilm.ts).
+// Clustering prefers full EXTRACTED bodies + MiniLM embeddings (embed.minilm.ts).
 // Headline TF-IDF (title_cluster_distance / pairwiseSimilarity) is fallback when bodies are missing.
 // No Gemini in this module.
 
@@ -13,13 +13,13 @@ import { extractEntitiesDetailed, extractEntitiesFlattened } from "./nlp/entity.
 import { detectLanguage, getStopwordsForLanguage, isDevanagariHeavy, isMostlyLatinScript } from "./nlp/language.service";
 export { isDevanagariHeavy, isMostlyLatinScript } from "./nlp/language.service";
 
-const JUNK_TITLE_RE = /gold rate today|silver rate|gold rate|petrol price|diesel price|petrol rate|diesel rate|teer result|\bteer\b|horoscope|rashifal|à¤°à¤¾à¤¶à¤¿à¤«à¤²|raksha bandhan|rakhi|train time|amrit bharat express route|cricket score|cricket association|hockey wc|wtc standing|\bipl\b|ipl scorecard|scorecard|fantasy|weather today in|lucky number|\bfc\b|football|video goes viral|viral video|calculator|tax calculator|income tax calculator|à¤¸à¥‹à¤¨à¤¾|à¤¸à¥‹à¤¨à¥‡ à¤•à¥€ à¤•à¥€à¤®à¤¤|à¤¸à¥‹à¤¨à¥‡ à¤•à¤¾ à¤­à¤¾à¤µ|à¤šà¤¾à¤‚à¤¦à¥€ à¤•à¤¾ à¤­à¤¾à¤µ|à¤‡à¤¨à¤•à¤® à¤Ÿà¥ˆà¤•à¥à¤¸ à¤•à¥ˆà¤²à¤•à¥à¤²à¥‡à¤Ÿà¤°|à¤•à¥ˆà¤²à¤•à¥à¤²à¥‡à¤Ÿà¤°|baking at home|baking for beginners|\brecipe\b|crossword|sudoku|watch live|live score|stock price|stock tip|stock tips|share tip|share tips|epaper|e-paper|photo gallery|how to (file|calculate|check|use|make|apply)|à¤¤à¤¾à¤œà¤¾ à¤¸à¤®à¤¾à¤šà¤¾à¤°|à¤²à¤¾à¤‡à¤µ à¤¬à¥à¤°à¥‡à¤•à¤¿à¤‚à¤—|à¤®à¥à¤–à¥à¤¯ à¤”à¤° à¤¤à¤¾à¤œà¤¾|à¤ªà¤¢à¤¼à¥‡à¤‚ .{0,12}à¤•à¥‡ à¤®à¥à¤–à¥à¤¯|à¤¶à¥‡à¤¯à¤° à¤Ÿà¤¿à¤ªà¥à¤¸|à¤«à¥ˆà¤‚à¤Ÿà¥‡à¤¸à¥€|à¤•à¥à¤°à¤¿à¤•à¥‡à¤Ÿ à¤¸à¥à¤•à¥‹à¤°|à¤«à¥‹à¤Ÿà¥‹ à¤—à¥ˆà¤²à¤°à¥€|à¤ˆ-à¤ªà¥‡à¤ªà¤°|à¤ˆà¤ªà¥‡à¤ªà¤°|à¤Ÿà¥€à¤¯à¤° à¤°à¤¿à¤œà¤²à¥à¤Ÿ/i;
+const JUNK_TITLE_RE = /gold rate today|silver rate|gold rate|petrol price|diesel price|petrol rate|diesel rate|teer result|\bteer\b|horoscope|rashifal|राशिफल|raksha bandhan|rakhi|train time|amrit bharat express route|cricket score|cricket association|hockey wc|wtc standing|\bipl\b|ipl scorecard|scorecard|fantasy|weather today in|lucky number|\bfc\b|football|video goes viral|viral video|calculator|tax calculator|income tax calculator|सोना|सोने की कीमत|सोने का भाव|चांदी का भाव|इनकम टैक्स कैलकुलेटर|कैलकुलेटर|baking at home|baking for beginners|\brecipe\b|crossword|sudoku|watch live|live score|stock price|stock tip|stock tips|share tip|share tips|epaper|e-paper|photo gallery|how to (file|calculate|check|use|make|apply)|ताजा समाचार|लाइव ब्रेकिंग|मुख्य और ताजा|पढ़ें .{0,12}के मुख्य|शेयर टिप्स|फैंटेसी|क्रिकेट स्कोर|फोटो गैलरी|ई-पेपर|ईपेपर|टीयर रिजल्ट/i;
 
 export function isJunkTitle(title: string): boolean {
   return JUNK_TITLE_RE.test(String(title || ""));
 }
 
-/** Homepage rails: English-first â€” no junk, no Devanagari-heavy titles, Latin/English preferred. */
+/** Homepage rails: English-first — no junk, no Devanagari-heavy titles, Latin/English preferred. */
 export function isHomepageEligible(story: { title?: string; description?: string; language?: string } | null | undefined): boolean {
   if (!story) return false;
   const title = String(story.title || "").trim();
@@ -45,7 +45,7 @@ export function normalizeTitle(title: string): string {
     .toLowerCase()
     .replace(/[''`]/g, "")
     .replace(/^(breaking|live|update|watch|exclusive|just in)[:\-\s]+/i, "")
-    .replace(/\s*[\|\-â€“â€”]\s*(the hindu|indian express|times of india|hindustan times|ndtv|news18|zee news|abp|india today|opindia|swarajya|the quint|eastmojo|sentinel assam).*$/i, "")
+    .replace(/\s*[\|\-–—]\s*(the hindu|indian express|times of india|hindustan times|ndtv|news18|zee news|abp|india today|opindia|swarajya|the quint|eastmojo|sentinel assam).*$/i, "")
     .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -110,7 +110,7 @@ export function isRegionalDesk(source: string): boolean {
   return REGIONAL_SOURCES.some(r => s.includes(r.toLowerCase()));
 }
 
-/** Geography from TITLE+DESCRIPTION only. Never from an outlet's RSS region field. Word-boundary so kanpur â‰  karnataka. */
+/** Geography from TITLE+DESCRIPTION only. Never from an outlet's RSS region field. Word-boundary so kanpur ≠ karnataka. */
 export function inferStoryRegion(title: string, description = ""): string | null {
   const hay = `${title || ""} ${description || ""}`.toLowerCase();
   if (!hay.trim()) return null;
@@ -343,5 +343,4 @@ function calculate_tripartite_distance(
 }
 
 // Same event if distance is under this. Body+MiniLM when both EXTRACTED; else headline TF-IDF.
-export const CLUSTERING_THRESHOLD = 0.38;
-
+export const CLUSTERING_THRESHOLD = 0.48;
