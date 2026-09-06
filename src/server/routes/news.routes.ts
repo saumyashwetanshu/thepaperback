@@ -1,7 +1,6 @@
-﻿import express from "express";
-import { applyStoryHonesty } from "../services/honesty.service";
+import express from "express";
+import { applyStoryHonesty, applyStoriesHonesty } from "../services/honesty.service";
 import { z } from "zod";
-import { applyStoryHonesty } from "../services/honesty.service";
 import {
   getStories, getLiveWire, getStoryById, getFactChecks,
   saveFactCheck, getLeadStory, getTrendingStories,
@@ -13,13 +12,9 @@ import {
   archiveStaleStories
 } from "../../utils/dbOperations";
 import { searchLiveNews, liveFactCheckClaim, ai, getGeminiClient } from "../services/news.service";
-import { applyStoryHonesty } from "../services/honesty.service";
 import { generateContentWithFallback } from "../services/gemini.service";
-import { applyStoryHonesty } from "../services/honesty.service";
 import { sanitizeForPrompt, enrichStoryFromFullArticles, storyNeedsFullArticleEnrich } from "../services/ingestion.service";
-import { applyStoryHonesty } from "../services/honesty.service";
 import { NewsStory } from "../../types";
-import { applyStoryHonesty } from "../services/honesty.service";
 
 const router = express.Router();
 
@@ -143,7 +138,7 @@ router.get("/", async (req, res) => {
       return res.json({
         success: true,
         query: q.trim(),
-        stories: searchResults.slice(offset, offset + limit),
+        stories: applyStoriesHonesty(searchResults.slice(offset, offset + limit)),
         wire: wire,
         pagination: { page, limit, total: searchResults.length }
       });
@@ -188,7 +183,14 @@ router.get("/", async (req, res) => {
 
     const wire = await wirePromise;
 
-    // Homepage rails only â€” omit stories (never send empty stories: [])
+    leadStory = leadStory ? applyStoryHonesty(leadStory) : leadStory;
+    trendingRail = applyStoriesHonesty(trendingRail);
+    todaysEssentials = applyStoriesHonesty(todaysEssentials);
+    coverageDiffers = applyStoriesHonesty(coverageDiffers);
+    voicesOfIndia = applyStoriesHonesty(voicesOfIndia);
+    otherDevelopments = applyStoriesHonesty(otherDevelopments);
+
+    // Homepage rails only Ã¢â‚¬â€ omit stories (never send empty stories: [])
     res.json({
       success: true,
       leadStory,
@@ -484,7 +486,7 @@ You are engaging in a multi-turn conversation with a reader or news analyst.
 TRUTH RULES (non-negotiable):
 - ONLY use facts present in the EXTRACTED article excerpts and indexed story fields below.
 - NEVER invent facts, numbers, quotes, desks, places, or timelines not present in the provided material.
-- If evidence is thin: say so / NEEDS CONTEXT / omit the claim â€” do NOT fill gaps with model knowledge.
+- If evidence is thin: say so / NEEDS CONTEXT / omit the claim Ã¢â‚¬â€ do NOT fill gaps with model knowledge.
 - Prefer full-article excerpts over headlines or short summaries when both exist.
 
 Story Title: ${story.title}
