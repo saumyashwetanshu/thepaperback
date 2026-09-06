@@ -1,7 +1,6 @@
 ﻿import express from "express";
-import { applyStoryHonesty } from "../services/honesty.service";
+import { applyStoryHonesty, applyStoriesHonesty } from "../services/honesty.service";
 import { z } from "zod";
-import { applyStoryHonesty } from "../services/honesty.service";
 import {
   getStories, getLiveWire, getStoryById, getFactChecks,
   saveFactCheck, getLeadStory, getTrendingStories,
@@ -13,13 +12,9 @@ import {
   archiveStaleStories
 } from "../../utils/dbOperations";
 import { searchLiveNews, liveFactCheckClaim, ai, getGeminiClient } from "../services/news.service";
-import { applyStoryHonesty } from "../services/honesty.service";
 import { generateContentWithFallback } from "../services/gemini.service";
-import { applyStoryHonesty } from "../services/honesty.service";
 import { sanitizeForPrompt, enrichStoryFromFullArticles, storyNeedsFullArticleEnrich } from "../services/ingestion.service";
-import { applyStoryHonesty } from "../services/honesty.service";
 import { NewsStory } from "../../types";
-import { applyStoryHonesty } from "../services/honesty.service";
 
 const router = express.Router();
 
@@ -187,6 +182,12 @@ router.get("/", async (req, res) => {
     }
 
     const wire = await wirePromise;
+    leadStory = leadStory ? applyStoryHonesty(leadStory) : leadStory;
+    trendingRail = applyStoriesHonesty(trendingRail);
+    todaysEssentials = applyStoriesHonesty(todaysEssentials);
+    coverageDiffers = applyStoriesHonesty(coverageDiffers);
+    voicesOfIndia = applyStoriesHonesty(voicesOfIndia);
+    otherDevelopments = applyStoriesHonesty(otherDevelopments);
 
     // Homepage rails only â€” omit stories (never send empty stories: [])
     res.json({
