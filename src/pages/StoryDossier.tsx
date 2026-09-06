@@ -114,7 +114,7 @@ export function StoryDossier() {
           Overview
         </a>
         <a href="#consensus" className="px-3 py-1 rounded-full text-xs font-sans font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0 transition-colors">
-          Corroborated Facts
+          What the articles agree on
         </a>
         <a href="#framing" className="px-3 py-1 rounded-full text-xs font-sans font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 shrink-0 transition-colors">
           Framing Divergence
