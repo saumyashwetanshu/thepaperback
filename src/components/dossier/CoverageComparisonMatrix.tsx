@@ -1,418 +1,485 @@
-import React from 'react';
-import type { NewsStory, Perspective } from '../../types';
-import { summarizeNewsroomAccount, decodeHtmlEntities } from '../../utils/decode';
+import React, { useEffect, useMemo, useState } from "react";
+import type { NewsStory, Perspective } from "../../types";
+import { summarizeNewsroomAccount, decodeHtmlEntities } from "../../utils/decode";
+import { useLanguage } from "../../context/LanguageContext";
+import { translateTextsBatch, textNeedsTranslation, hasIndicScript } from "../../data/newsTranslator";
 
-export function CoverageComparisonMatrix({ story }: { story: NewsStory }) {
-  // Deduplicate perspectives by source name
-  const seenSources = new Set<string>();
-  const uniquePerspectives: Perspective[] = [];
-  
-  if (story.perspectives) {
-    for (const p of story.perspectives) {
-      const cleanSrc = cleanSourceName(p.source);
-      if (!seenSources.has(cleanSrc)) {
-        seenSources.add(cleanSrc);
-        uniquePerspectives.push(p);
-      }
-    }
+function cleanSourceName(source?: string): string {
+  if (!source) return "News desk";
+  return source
+    .replace(/\s*\(HTML\)/gi, "")
+    .replace(/\s*\(RSS\)/gi, "")
+    .replace(/\s*\[RSS\]/gi, "")
+    .replace(/\s*Feed$/gi, "")
+    .trim();
+}
+
+function cleanText(s?: string): string {
+  return decodeHtmlEntities(String(s || ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isKeywordDump(s: string): boolean {
+  const t = cleanText(s);
+  if (!t) return true;
+  const words = t.split(/[\s,;|/]+/).filter(Boolean);
+  if (words.length >= 4) {
+    const avg = words.reduce((n, w) => n + w.length, 0) / words.length;
+    const commaHeavy = (t.match(/,/g) || []).length >= 3;
+    const noSentence = !/[.?!]/.test(t) && t.length < 160;
+    if ((commaHeavy || avg <= 8) && noSentence) return true;
+  }
+  return false;
+}
+
+function isTemplateFraming(s: string): boolean {
+  return /frames this through a .+ lens|what it elevates versus what it leaves aside|Reporting strategy reads as|Emphasis cluster:|costume framing|clearest signal is its own headline/i.test(
+    s
+  );
+}
+
+function isHeadlineEcho(summary: string, headline: string, source: string): boolean {
+  const s = cleanText(summary).toLowerCase();
+  const h = cleanText(headline).toLowerCase();
+  if (!s || !h) return true;
+  if (/^reporting by\s+/i.test(summary) && s.includes(h.slice(0, Math.min(40, h.length)))) return true;
+  const snorm = s.replace(/[^a-z0-9\u0900-\u097f]+/g, "");
+  const hnorm = h.replace(/[^a-z0-9\u0900-\u097f]+/g, "");
+  if (hnorm.length > 20 && (snorm === hnorm || snorm.includes(hnorm) || hnorm.includes(snorm))) {
+    if (Math.abs(snorm.length - hnorm.length) < 24) return true;
+  }
+  const src = cleanSourceName(source).toLowerCase();
+  if (s.startsWith(`reporting by ${src}`) && s.length < h.length + 40) return true;
+  return false;
+}
+
+function isUsefulProse(s: string): boolean {
+  const t = cleanText(s);
+  if (t.length < 48) return false;
+  if (isKeywordDump(t)) return false;
+  if (isTemplateFraming(t)) return false;
+  return t.split(/\s+/).filter(Boolean).length >= 10;
+}
+
+function scorePerspective(p: Perspective): number {
+  let score = 0;
+  const summary = cleanText(p.narrativeSummary || p.leadParagraph || "");
+  score += Math.min(summary.length, 800);
+  if (p.extractionStatus === "EXTRACTED") score += 400;
+  else if (p.extractionStatus === "PARTIAL") score += 120;
+  if (p.url) score += 20;
+  if (!/[\u0900-\u097F]/.test(summary + (p.title || ""))) score += 80;
+  if (isUsefulProse(summary)) score += 200;
+  return score;
+}
+
+function uniqueDesks(list: Perspective[]): Perspective[] {
+  const best = new Map<string, Perspective>();
+  for (const p of list) {
+    const key = cleanSourceName(p.source).toLowerCase();
+    const prev = best.get(key);
+    if (!prev || scorePerspective(p) > scorePerspective(prev)) best.set(key, p);
+  }
+  return Array.from(best.values());
+}
+
+function coverageSummary(p: Perspective, headline: string): string | null {
+  const source = cleanSourceName(p.source);
+  const candidates = [p.narrativeSummary, p.leadParagraph, p.standfirst, p.quote, (p as any).content]
+    .map((x) => cleanText(x))
+    .filter(Boolean);
+
+  for (const c of candidates) {
+    if (isHeadlineEcho(c, headline, source)) continue;
+    if (isKeywordDump(c)) continue;
+    if (c.length < 48) continue;
+    const clipped = c.length > 340 ? `${c.slice(0, 337).trim()}…` : c;
+    if (isHeadlineEcho(clipped, headline, source)) continue;
+    return clipped;
   }
 
-  if (uniquePerspectives.length < 1) {
+  const soft = summarizeNewsroomAccount(
+    String(p.narrativeSummary || p.leadParagraph || p.quote || ""),
+    72
+  );
+  if (soft && !isHeadlineEcho(soft, headline, source) && soft.length >= 48) return soft;
+  return null;
+}
+
+function storedFraming(p: Perspective): string | null {
+  const candidates = [p.framingLens, p.editorialFraming, p.framingStrategy]
+    .map((x) => cleanText(x))
+    .filter(Boolean);
+  for (const c of candidates) {
+    if (isKeywordDump(c) || isTemplateFraming(c) || !isUsefulProse(c)) continue;
+    return c.length > 280 ? `${c.slice(0, 277).trim()}…` : c;
+  }
+  return null;
+}
+
+type DeskAudit = {
+  framing: string | null;
+  strategy: string | null;
+  shortcomings: string | null;
+};
+
+async function fetchDeskAudit(payload: {
+  source: string;
+  headline: string;
+  summary: string;
+  excerpt: string;
+  targetLang: string;
+  signal?: AbortSignal;
+}): Promise<DeskAudit | null> {
+  try {
+    const res = await fetch("/api/translate/desk-audit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: payload.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.success) return null;
+    return {
+      framing: data.framing || null,
+      strategy: data.strategy || null,
+      shortcomings: data.shortcomings || null,
+    };
+  } catch {
     return null;
   }
+}
 
-  function cleanSourceName(source: string): string {
-    if (!source) return "Independent Desk";
-    return source
-      .replace(/\s*\(HTML\)/gi, '')
-      .replace(/\s*\(RSS\)/gi, '')
-      .replace(/\s*\[RSS\]/gi, '')
-      .replace(/\s*Feed$/gi, '')
-      .trim();
-  }
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-3.5 w-3.5 shrink-0 transition-transform duration-300 ${open ? "rotate-180" : ""}`}
+      viewBox="0 0 16 16"
+      fill="none"
+      aria-hidden
+    >
+      <path
+        d="M4 6l4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
-  // Curated translation map for Hindi headlines to clean English
-  function getEnglishHeadline(title: string): { main: string; originalHindi?: string } {
-    const decoded = decodeHtmlEntities(title);
-    if (!/[\u0900-\u097F]/.test(decoded)) {
-      return { main: decoded };
-    }
+function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
+  const { language } = useLanguage();
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [openDenoiser, setOpenDenoiser] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [audit, setAudit] = useState<DeskAudit | null>(null);
 
-    if (decoded.includes("अंतहीन युद्ध") || decoded.includes("पुतिन")) {
-      return {
-        main: "'Move from Endless War to End of War': PM Modi Tells Putin During Bilateral Talks",
-        originalHindi: decoded
-      };
-    }
-    if (decoded.includes("नेपाल") && (decoded.includes("बाढ़") || decoded.includes("हरा घर"))) {
-      return {
-        main: "Nepal Floods: Family Survives Disaster as Green House Remains Standing Amidst Devastation",
-        originalHindi: decoded
-      };
-    }
-    if (decoded.includes("सुशांत") || decoded.includes("दिशा")) {
-      return {
-        main: "Bombay High Court Raises Critical Questions on Investigation into Disha Salian's Death",
-        originalHindi: decoded
-      };
-    }
-    if (decoded.includes("सिंधु") || decoded.includes("हेग")) {
-      return {
-        main: "India Rejects Hague Court of Arbitration Competence on Indus Waters Dispute",
-        originalHindi: decoded
-      };
-    }
-    if (decoded.includes("BCCI") || decoded.includes("गंभीर")) {
-      return {
-        main: "BCCI Summons Gautam Gambhir, Agarkar, and Laxman to Mumbai for Strategic Review",
-        originalHindi: decoded
-      };
-    }
+  const source = cleanSourceName(p.source);
+  const baseHeadline = cleanText(p.title || storyTitle);
+  const baseSummary = coverageSummary(p, baseHeadline);
+  const baseFraming = storedFraming(p);
+  const excerpt = cleanText((p as any).content || p.leadParagraph || p.narrativeSummary || "").slice(0, 3500);
+  const wasIndic = hasIndicScript(baseHeadline + " " + (baseSummary || ""));
 
-    return {
-      main: decoded,
-      originalHindi: undefined
+  const [headline, setHeadline] = useState(baseHeadline);
+  const [summary, setSummary] = useState(baseSummary);
+  const [framing, setFraming] = useState(baseFraming);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ac = new AbortController();
+    const inputs = [baseHeadline, baseSummary || "", baseFraming || ""];
+    const needs = inputs.some((t) => t && textNeedsTranslation(t, language));
+    if (!needs) {
+      setHeadline(baseHeadline);
+      setSummary(baseSummary);
+      setFraming(baseFraming);
+      setBusy(false);
+      return;
+    }
+    setBusy(true);
+    (async () => {
+      const out = await translateTextsBatch(inputs, language, ac.signal);
+      if (cancelled) return;
+      setHeadline(out[0] || baseHeadline);
+      setSummary(baseSummary ? out[1] || baseSummary : null);
+      setFraming(baseFraming ? out[2] || baseFraming : null);
+      setBusy(false);
+    })();
+    return () => {
+      cancelled = true;
+      ac.abort();
     };
-  }
+  }, [language, baseHeadline, baseSummary, baseFraming]);
 
-  // Parse and clean tags: discard numbers (039, 839), stopwords, and broken word fragments
-  function parseTerms(raw: string | undefined): string[] {
-    if (!raw || raw === "None identified.") return [];
-    const noise = new Set([
-      'the', 'and', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 
-      'from', 'as', 'is', 'are', 'was', 'were', 'it', 'its', 'that', 'this', 'these', 
-      'those', 'have', 'has', 'had', 'be', 'been', 'but', 'still', 'not', 'no', 'or', 
-      'also', 'said', 'says', 'after', 'before', 'over', 'into', 'reinforces', 'need',
-      'raises', 'question', 'slams', 'watch', 'disagrees', 'opinion', 'remarks', 'html',
-      'feed', 'news', 'update', 'border', 'report', 'reports', 'about', 'more', 'should',
-      'tells', 'tell', 'margins', 'amid', 'when', 'what', 'where', 'which', 'who', 'whom',
-      'whose', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other',
-      'some', 'such', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'can', 'will',
-      'just', 'don', 'now', 'could', 'would', 'might', 'must', 'two', 'three', 'take',
-      'first', 'last', 'well', 'much', 'like', 'even', 'then', 'told'
-    ]);
+  useEffect(() => {
+    setAudit(null);
+    setAuditError(null);
+    setOpenDenoiser(false);
+  }, [language, source, baseHeadline]);
 
-    const terms = raw
-      .replace(/^\[|\]$/g, '')
-      .split(/,\s*|\n+/)
-      .map(t => t.replace(/["'&#;\d]/g, '').trim())
-      .filter(t => t.length >= 4 && !noise.has(t.toLowerCase()) && !/^\d+$/.test(t))
-      .map(t => t.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' '))
-      .filter((v, i, a) => a.indexOf(v) === i);
-
-    // Return maximum 3 high-value substantive terms, or empty array if fewer than 2 valid terms
-    return terms.length >= 2 ? terms.slice(0, 3) : [];
-  }
-
-  interface FramingAnalysis {
-    badge: string;
-    emphasisExplanation: string;
-    omissionExplanation?: string;
-    emphasizedTags: string[];
-    omittedTags: string[];
-  }
-
-  function analyzeEditorialFraming(perspective: Perspective, headline: string): FramingAnalysis {
-    const rawLens = (perspective.framingLens || perspective.editorialFraming || perspective.framingStrategy || "").toLowerCase().trim();
-    const rawEmp = perspective.emphasized || "";
-    const rawOmit = perspective.keyOmissions || perspective.downplayed || "";
-    const lowerHeadline = headline.toLowerCase();
-
-    let badge = "Straightforward Factual Dispatch";
-    let defaultEmphasis = "Direct chronological reporting of factual developments with standard wire attribution.";
-    let defaultOmission = "";
-
-    if (rawLens.includes("solidarity") || rawLens.includes("continuity") || lowerHeadline.includes("endless war") || lowerHeadline.includes("putin")) {
-      badge = "Over-Emphasis on Global Peace Diplomacy & Bilateral Partnership";
-      defaultEmphasis = "Centers PM Modi's peace appeal, the 'Endless War to End of War' message, and bilateral diplomatic ties.";
-      defaultOmission = "Downplays Western sanctions friction and specific battlefield tactics.";
-    } else if (rawLens.includes("selective") || rawLens.includes("data") || rawLens.includes("metric")) {
-      badge = "Over-Emphasis on Specific Metrics & Operational Data";
-      defaultEmphasis = "Prioritizes specific physical measurements, casualty figures, and local damage statistics.";
-      defaultOmission = "Downplays broader systemic preparedness and institutional oversight.";
-    } else if (rawLens.includes("alarm") || rawLens.includes("urgency") || rawLens.includes("crisis")) {
-      badge = "Over-Emphasis on Imminent Threat & Crisis Rhetoric";
-      defaultEmphasis = "Centers acute danger, emergency vulnerability, and worst-case scenario projections.";
-      defaultOmission = "Downplays stabilizing factors, official mitigation responses, and long-term recovery efforts.";
-    } else if (rawLens.includes("theological") || rawLens.includes("socio-religious") || rawLens.includes("religion") || rawLens.includes("islamic") || lowerHeadline.includes("scholar") || lowerHeadline.includes("cleric")) {
-      badge = "Oversimplification into Theological & Doctrinal Controversy";
-      defaultEmphasis = "Focuses heavily on religious statements, doctrinal legitimacy, and communal identity arguments.";
-      defaultOmission = "Downplays civil constitutional rights, civic welfare protections, and administrative law.";
-    } else if (rawLens.includes("political") || rawLens.includes("coalition") || rawLens.includes("partisan") || lowerHeadline.includes("cm slams") || lowerHeadline.includes("chennithala")) {
-      badge = "Oversimplification into Political Friction & Party Barbs";
-      defaultEmphasis = "Centers electoral friction, party spokespersons, and public rhetorical exchanges between politicians.";
-      defaultOmission = "Downplays underlying civic implications and policy remedies in favor of political optics.";
-    } else if (rawLens.includes("softening") || rawLens.includes("procedural") || rawLens.includes("neutral")) {
-      badge = "Oversimplification via Institutional & Procedural Clarifications";
-      defaultEmphasis = "Highlights official spokesperson quotes, procedural regulations, and formal bureaucratic process.";
-      defaultOmission = "Downplays critical independent evaluations, public dissent, and systemic policy lapses.";
-    } else if (rawLens.includes("preparedness") || rawLens.includes("climate") || rawLens.includes("disaster") || lowerHeadline.includes("preparedness") || lowerHeadline.includes("disaster")) {
-      badge = "Over-Emphasis on Regional Policy & Infrastructure Preparedness";
-      defaultEmphasis = "Prioritizes climate risk models, early warning system gaps, and cross-border dam infrastructure.";
-      defaultOmission = "Downplays immediate bilateral diplomatic outreach and ground-level rescue logistics.";
-    } else if (rawLens.includes("soft-power") || rawLens.includes("optics") || lowerHeadline.includes("carpool") || lowerHeadline.includes("nomad")) {
-      badge = "Over-Emphasis on Soft-Power Optics & Informal Rapport";
-      defaultEmphasis = "Centers the shared vehicle journey, personal camaraderie, and symbolic optics between the two leaders.";
-      defaultOmission = "Downplays substantive strategic negotiations in favor of ceremonial camaraderie.";
-    } else if (rawLens.length > 3) {
-      const formatted = rawLens
-        .split(/\s+/)
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ");
-      badge = formatted.startsWith("Over-") || formatted.startsWith("Oversimplification")
-        ? formatted
-        : `Over-Emphasis on ${formatted}`;
-      defaultEmphasis = `Centers aspects focused on ${rawLens}.`;
+  async function toggleDenoiser() {
+    if (openDenoiser) {
+      setOpenDenoiser(false);
+      return;
     }
+    setOpenDenoiser(true);
+    if (audit || auditLoading) return;
+    setAuditLoading(true);
+    setAuditError(null);
+    const result = await fetchDeskAudit({
+      source,
+      headline: headline || baseHeadline,
+      summary: summary || baseSummary || "",
+      excerpt,
+      targetLang: language,
+    });
+    setAuditLoading(false);
+    if (!result || (!result.strategy && !result.shortcomings && !result.framing)) {
+      setAuditError("Not enough extract yet for a useful framing read.");
+      return;
+    }
+    setAudit(result);
+    if (!framing && result.framing) setFraming(result.framing);
+  }
 
-    const empTags = parseTerms(rawEmp);
-    const omitTags = parseTerms(rawOmit);
+  const url = p.url || "";
+  const faceFraming = framing || audit?.framing || null;
+  const langHint =
+    language === "en" && wasIndic
+      ? "From Hindi"
+      : language === "hi" && !wasIndic && /[A-Za-z]{4,}/.test(baseHeadline)
+        ? "अंग्रेज़ी से"
+        : null;
 
-    return {
-      badge,
-      emphasisExplanation: defaultEmphasis,
-      omissionExplanation: defaultOmission || (omitTags.length > 0 ? "Downplays secondary contextual angles." : undefined),
-      emphasizedTags: empTags,
-      omittedTags: omitTags,
-    };
+  async function copyLink() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
   }
 
   return (
-    <section id="matrix" className="flex flex-col gap-6">
-      <header className="mb-2 border-b border-gray-200/90 dark:border-gray-800 pb-4">
-        <span className="text-[10px] font-sans font-bold uppercase tracking-widest text-gray-400">
-          Cross-Desk Verification
-        </span>
-        <h2 className="text-[24px] md:text-[28px] font-black tracking-tight text-black dark:text-white mb-1">
-          Newsroom Editorial Comparison
-        </h2>
-        <p className="text-[13px] text-gray-500 dark:text-gray-400 font-medium">
-          Compare reported accounts, narrative framing, and highlighted vs omitted context across independent desks
+    <article className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-black/[0.06] bg-white shadow-[0_1px_0_rgba(0,0,0,0.03)] transition-[box-shadow,border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-black/[0.1] hover:shadow-[0_12px_32px_-12px_rgba(0,0,0,0.14)] dark:border-white/[0.08] dark:bg-[#0c0c0e] dark:hover:border-white/[0.14] dark:hover:shadow-[0_16px_40px_-16px_rgba(0,0,0,0.6)]">
+      {/* quiet top hairline accent */}
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-rose-500/40 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+
+      <div className={`flex flex-1 flex-col px-5 pb-5 pt-5 md:px-6 md:pb-6 md:pt-6 ${busy ? "opacity-75" : ""}`}>
+        {/* masthead */}
+        <div className="mb-3.5 flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" aria-hidden />
+            <p className="truncate text-[12px] font-sans font-semibold tracking-wide text-zinc-800 dark:text-zinc-200">
+              {source}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {langHint ? (
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                {langHint}
+              </span>
+            ) : null}
+            {busy ? (
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-300 dark:bg-zinc-600" aria-hidden />
+            ) : null}
+          </div>
+        </div>
+
+        {/* headline — primary */}
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="font-serif text-[22px] font-bold leading-[1.22] tracking-[-0.025em] text-zinc-950 transition-colors hover:text-rose-700 dark:text-zinc-50 dark:hover:text-rose-400 md:text-[24px]"
+          >
+            {headline}
+          </a>
+        ) : (
+          <h3 className="font-serif text-[22px] font-bold leading-[1.22] tracking-[-0.025em] text-zinc-950 dark:text-zinc-50 md:text-[24px]">
+            {headline}
+          </h3>
+        )}
+
+        {/* narrative summary — soft paper well */}
+        <div className="mt-4">
+          <p className="mb-2 text-[10px] font-sans font-semibold uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
+            Narrative summary
+          </p>
+          <div className="rounded-xl bg-zinc-50/90 px-4 py-3.5 dark:bg-zinc-900/60">
+            <p
+              className={`text-[15px] leading-[1.65] ${
+                summary
+                  ? "text-zinc-700 dark:text-zinc-300"
+                  : "italic text-zinc-400 dark:text-zinc-500"
+              }`}
+            >
+              {summary ||
+                "No separate summary beyond the headline in our extract — open the original for the full piece."}
+            </p>
+          </div>
+        </div>
+
+        {/* framing lens — pull-quote feel */}
+        {faceFraming ? (
+          <div className="mt-4 border-l-2 border-rose-500/50 pl-3.5">
+            <p className="mb-1.5 text-[10px] font-sans font-semibold uppercase tracking-[0.16em] text-rose-600/80 dark:text-rose-400/90">
+              The framing lens
+            </p>
+            <p className="font-serif text-[15px] italic leading-[1.55] text-zinc-600 dark:text-zinc-400">
+              {faceFraming}
+            </p>
+          </div>
+        ) : null}
+
+        {/* narrative de-noiser */}
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={toggleDenoiser}
+            className={`flex w-full items-center justify-between gap-3 rounded-xl px-3.5 py-3 text-left transition-colors duration-200 ${
+              openDenoiser
+                ? "bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+                : "bg-transparent text-rose-700 hover:bg-rose-50/80 dark:text-rose-400 dark:hover:bg-rose-950/30"
+            }`}
+            aria-expanded={openDenoiser}
+          >
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em]">
+              {openDenoiser ? "Hide analysis" : "Narrative de-noiser"}
+            </span>
+            <Chevron open={openDenoiser} />
+          </button>
+
+          <div
+            className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${
+              openDenoiser ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+            }`}
+          >
+            <div className="overflow-hidden">
+              <div className="mt-2 space-y-3 rounded-xl border border-zinc-100 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+                {auditLoading ? (
+                  <div className="flex items-center gap-2.5 py-1">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-400" />
+                    <p className="text-[13.5px] text-zinc-500 dark:text-zinc-400">
+                      Reading the extract for framing and gaps…
+                    </p>
+                  </div>
+                ) : null}
+
+                {auditError && !auditLoading ? (
+                  <p className="text-[13.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    {auditError}
+                  </p>
+                ) : null}
+
+                {audit?.strategy ? (
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-sans font-semibold uppercase tracking-[0.14em] text-zinc-400">
+                      Framing strategy
+                    </p>
+                    <p className="text-[14.5px] leading-[1.6] text-zinc-800 dark:text-zinc-200">
+                      {audit.strategy}
+                    </p>
+                  </div>
+                ) : null}
+
+                {audit?.strategy && audit?.shortcomings ? (
+                  <div className="h-px bg-zinc-200/80 dark:bg-zinc-700/60" />
+                ) : null}
+
+                {audit?.shortcomings ? (
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-sans font-semibold uppercase tracking-[0.14em] text-rose-600/80 dark:text-rose-400/90">
+                      Narrative discrepancies
+                    </p>
+                    <p className="text-[14.5px] leading-[1.6] text-zinc-800 dark:text-zinc-200">
+                      {audit.shortcomings}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* footer actions */}
+        <div className="mt-auto flex flex-wrap items-center gap-x-1 gap-y-2 border-t border-zinc-100 pt-4 dark:border-zinc-800/80">
+          {url ? (
+            <>
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-100 hover:text-rose-700 dark:text-zinc-100 dark:hover:bg-zinc-800 dark:hover:text-rose-400"
+              >
+                Read story
+                <span aria-hidden className="text-[11px] opacity-60">
+                  ↗
+                </span>
+              </a>
+              <span className="text-zinc-200 dark:text-zinc-700" aria-hidden>
+                ·
+              </span>
+              <button
+                type="button"
+                onClick={copyLink}
+                className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              >
+                {copied ? "Copied" : "Copy link"}
+              </button>
+            </>
+          ) : (
+            <span className="px-2.5 py-1.5 text-[12px] text-zinc-400">Original unavailable</span>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export function CoverageComparisonMatrix({ story }: { story: NewsStory }) {
+  const desks = useMemo(
+    () => uniqueDesks(Array.isArray(story.perspectives) ? story.perspectives : []),
+    [story.perspectives]
+  );
+  if (desks.length < 1) return null;
+
+  return (
+    <section id="matrix" className="flex flex-col gap-7">
+      <header className="border-b border-zinc-200/90 pb-5 dark:border-zinc-800">
+        <div className="mb-2 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="mb-1.5 text-[11px] font-sans font-semibold uppercase tracking-[0.18em] text-rose-600 dark:text-rose-500">
+              From the desks
+            </p>
+            <h2 className="font-serif text-[28px] font-bold leading-tight tracking-[-0.025em] text-zinc-950 dark:text-zinc-50 md:text-[34px]">
+              How each newsroom led it
+            </h2>
+          </div>
+          <p className="pb-1 text-[12px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
+            {desks.length} {desks.length === 1 ? "desk" : "desks"}
+          </p>
+        </div>
+        <p className="max-w-2xl text-[14.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+          Headline and narrative first. Open Narrative de-noiser for framing strategy and gaps.
+          Language follows the toggle above.
         </p>
       </header>
-      
-      <div className="flex flex-col gap-6">
-        {uniquePerspectives.map((perspective: Perspective, idx: number) => {
-          const sourceName = cleanSourceName(perspective.source);
-          const headlineData = getEnglishHeadline(perspective.title);
-          const integrity = perspective.sourceIntegrity || "High";
-          let integrityColor = "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-800/60";
-          if (integrity === "Mixed") integrityColor = "bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/60";
-          if (integrity === "Low") integrityColor = "bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border-rose-200/60 dark:border-rose-800/60";
-          if (integrity === "Very High") integrityColor = "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 border-emerald-300/60 dark:border-emerald-700/60";
 
-          // Extraction health badge
-          const extStatus = perspective.extractionStatus;
-          let extractionBadge = {
-            text: "Full Text Extracted",
-            color: "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200/60 dark:border-emerald-800/60"
-          };
-          if (extStatus === "PARTIAL") {
-            extractionBadge = {
-              text: "Partial Excerpt",
-              color: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/60 dark:border-amber-800/60"
-            };
-          } else if (extStatus === "BLOCKED") {
-            extractionBadge = {
-              text: "Extraction Blocked",
-              color: "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-200/60 dark:border-rose-800/60"
-            };
-          } else if (extStatus === "PAYWALLED") {
-            extractionBadge = {
-              text: "Subscriber Paywalled",
-              color: "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200/60 dark:border-purple-800/60"
-            };
-          } else if (extStatus === "FAILED" || extStatus === "NOT_ARTICLE") {
-            extractionBadge = {
-              text: "Headline Only",
-              color: "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700"
-            };
-          }
-
-          // Generate true, grounded summary capped strictly at 45-50 words
-          let rawAccount = perspective.narrativeSummary || "";
-          if (!rawAccount || rawAccount.trim().length === 0 || rawAccount.trim() === perspective.title.trim()) {
-            rawAccount = perspective.leadParagraph || perspective.standfirst || perspective.quote || "";
-          }
-
-          // If rawAccount is still in Hindi or doesn't explain what is in the headline, provide grounded explanation
-          if (/[\u0900-\u097F]/.test(rawAccount) || rawAccount.includes("World Nomad Games") && headlineData.main.includes("Endless War")) {
-            rawAccount = "Focuses on PM Modi's direct appeal to Russian President Vladimir Putin during their 30-minute bilateral meeting in Bishkek, urging an urgent shift from 'Endless War' to the 'End of War' regarding Ukraine while reaffirming India's support for peaceful diplomatic resolution.";
-          }
-
-          const conciseSummary = summarizeNewsroomAccount(rawAccount, 45);
-          const framingAnalysis = analyzeEditorialFraming(perspective, headlineData.main);
-
-          return (
-            <article key={idx} className="bg-white dark:bg-gray-950 border border-gray-200/90 dark:border-gray-800 rounded-2xl p-6 md:p-8 shadow-2xs hover:border-gray-300 dark:hover:border-gray-700 transition-all flex flex-col gap-6 font-sans">
-              
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-                {/* Left Column: Headline, Reported Account & Framing (spans 8) */}
-                <div className="md:col-span-8 flex flex-col gap-4">
-                  {/* Publisher Header */}
-                  <div className="text-xs font-bold uppercase tracking-widest text-black dark:text-white border-b border-gray-100 dark:border-gray-800/80 pb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-rose-600"></span>
-                      <span className="font-bold text-[13px]">{sourceName}</span>
-                      {perspective.syndicatedAgency && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-semibold">
-                          via {perspective.syndicatedAgency}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-[11px] text-gray-400 font-medium">
-                      {new Date(perspective.publishedAt || Date.now()).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </span>
-                  </div>
-                  
-                  {/* Headline */}
-                  <div>
-                    <h3 className="font-serif font-bold text-2xl md:text-[26px] text-black dark:text-white leading-[1.25] tracking-tight">
-                      {headlineData.main}
-                    </h3>
-                    {headlineData.originalHindi && (
-                      <p className="text-[12px] text-gray-500 dark:text-gray-400 font-sans mt-1">
-                        Original Dispatch: "{headlineData.originalHindi}"
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Newsroom Version / Concise Executive Summary (Max 45-50 Words) */}
-                  {conciseSummary && (
-                    <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-gray-50/90 dark:bg-gray-900/60 border border-gray-100 dark:border-gray-800/80">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-[14px]">subject</span>
-                        This Newsroom's Reported Account
-                      </span>
-                      <p className="text-[14px] text-gray-800 dark:text-gray-200 leading-relaxed font-normal">
-                        {conciseSummary}
-                      </p>
-                    </div>
-                  )}
-                  
-                  {/* Editorial Framing Analysis */}
-                  <div className="flex flex-col gap-3 p-4 rounded-xl bg-gray-50/60 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-800">
-                    
-                    {/* Framing Badge */}
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[16px] text-rose-600 dark:text-rose-400 shrink-0">
-                          center_focus_strong
-                        </span>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                          Editorial Framing Lens
-                        </span>
-                      </div>
-                      <div className="text-[13.5px] font-bold text-gray-900 dark:text-gray-100 pl-6">
-                        {framingAnalysis.badge}
-                      </div>
-                    </div>
-
-                    {/* Explanatory Mapping */}
-                    <div className="flex flex-col gap-1.5 text-[12.5px] pl-6 border-l-2 border-rose-500/30 dark:border-rose-500/40 ml-2">
-                      <div className="text-gray-700 dark:text-gray-300">
-                        <span className="font-semibold text-gray-900 dark:text-gray-100">Emphasizes: </span>
-                        {framingAnalysis.emphasisExplanation}
-                      </div>
-                      {framingAnalysis.omissionExplanation && (
-                        <div className="text-gray-500 dark:text-gray-400 text-[12px]">
-                          <span className="font-medium text-gray-700 dark:text-gray-300">Downplays / Omits: </span>
-                          {framingAnalysis.omissionExplanation}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Emphasized Focus Pills (Filtered & Non-Monospace) */}
-                    {framingAnalysis.emphasizedTags.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-gray-100 dark:border-gray-800">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-500 dark:text-gray-400 font-bold shrink-0">
-                          Emphasized Focus:
-                        </span>
-                        {framingAnalysis.emphasizedTags.map((term, i) => (
-                          <span key={i} className="px-2.5 py-0.5 rounded-md bg-white dark:bg-gray-800 border border-gray-200/80 dark:border-gray-700 text-[11px] font-medium text-gray-700 dark:text-gray-300">
-                            {term}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Omitted or Downplayed Context Pills (Filtered & Non-Monospace) */}
-                    {framingAnalysis.omittedTags.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 font-semibold shrink-0">
-                          Omitted Context:
-                        </span>
-                        {framingAnalysis.omittedTags.map((term, i) => (
-                          <span key={i} className="px-2.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800/80 text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                            {term}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Direct Citation Highlighted by Desk */}
-                  {perspective.quote && (
-                    <div className="border-l-2 border-rose-500 pl-3.5 py-1 my-1 bg-rose-50/20 dark:bg-rose-950/10 rounded-r-lg">
-                      <span className="text-[10px] uppercase tracking-wider text-gray-400 block mb-0.5 font-bold">
-                        Key Citation Highlighted by Desk
-                      </span>
-                      <p className="font-serif italic text-[13.5px] text-gray-800 dark:text-gray-200 leading-snug">
-                        "{decodeHtmlEntities(perspective.quote)}"
-                      </p>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Right Column: Desk Profile & Provenance (spans 4) */}
-                <div className="md:col-span-4 flex flex-col gap-4 md:border-l border-gray-100 dark:border-gray-800 md:pl-6 pt-1">
-                  
-                  {/* Source Integrity */}
-                  <div>
-                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
-                      Reporting Standard
-                    </span>
-                    <span className={`inline-flex px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border ${integrityColor}`}>
-                      {integrity} Integrity
-                    </span>
-                  </div>
-
-                  {/* Text Extraction Status */}
-                  <div>
-                    <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
-                      Extraction Verification
-                    </span>
-                    <span className={`inline-flex px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border ${extractionBadge.color}`}>
-                      {extractionBadge.text}
-                    </span>
-                  </div>
-
-                  {/* Byline / Reporting Desk */}
-                  {perspective.authorByline && (
-                    <div>
-                      <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
-                        Byline
-                      </span>
-                      <span className="text-[13px] font-medium text-gray-800 dark:text-gray-200">
-                        {perspective.authorByline}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Action */}
-              <div className="flex justify-between items-center border-t border-gray-100 dark:border-gray-800/80 pt-4">
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  Indexed Newsroom Dispatch
-                </div>
-                <a href={perspective.url} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-black dark:text-white hover:text-rose-600 dark:hover:text-rose-400 uppercase tracking-widest flex items-center gap-1.5 transition-colors">
-                  Read Original Source <span className="material-symbols-outlined text-[14px]">open_in_new</span>
-                </a>
-              </div>
-            </article>
-          );
-        })}
+      <div className="grid grid-cols-1 items-stretch gap-5 md:grid-cols-2 md:gap-6">
+        {desks.map((p) => (
+          <DeskCard key={cleanSourceName(p.source)} p={p} storyTitle={story.title} />
+        ))}
       </div>
     </section>
   );
