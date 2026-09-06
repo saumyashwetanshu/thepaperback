@@ -1,5 +1,7 @@
 ﻿import express from "express";
+import { applyStoryHonesty } from "../services/honesty.service";
 import { z } from "zod";
+import { applyStoryHonesty } from "../services/honesty.service";
 import {
   getStories, getLiveWire, getStoryById, getFactChecks,
   saveFactCheck, getLeadStory, getTrendingStories,
@@ -11,9 +13,13 @@ import {
   archiveStaleStories
 } from "../../utils/dbOperations";
 import { searchLiveNews, liveFactCheckClaim, ai, getGeminiClient } from "../services/news.service";
+import { applyStoryHonesty } from "../services/honesty.service";
 import { generateContentWithFallback } from "../services/gemini.service";
+import { applyStoryHonesty } from "../services/honesty.service";
 import { sanitizeForPrompt, enrichStoryFromFullArticles, storyNeedsFullArticleEnrich } from "../services/ingestion.service";
+import { applyStoryHonesty } from "../services/honesty.service";
 import { NewsStory } from "../../types";
+import { applyStoryHonesty } from "../services/honesty.service";
 
 const router = express.Router();
 
@@ -81,10 +87,10 @@ function analysisFromStory(claim: string, story: any | null, allStories: any[]) 
   const disagreements = Array.isArray(story.pointsOfDisagreement) ? story.pointsOfDisagreement : [];
   
   let verdict = "VERIFIED";
-  let detail = `Verified report. Corroborated by ${n} independent news desk${n > 1 ? 's' : ''} across national coverage.`;
+  let detail = `Indexed from ${n} news desk${n > 1 ? 's' : ''} covering this story.`;
   if (disagreements.length > 0) {
     verdict = "PARTIALLY VERIFIED";
-    detail = `The core event is corroborated by ${n} outlets, but reports show diverging perspectives on specific details.`;
+    detail = `${n} desks cover this story; reports diverge on some details.`;
   }
 
   const evidence = (story.perspectives || []).slice(0, 5).map((p: any) => `${p.source}: '${p.title}'`).join(" | ");
@@ -97,7 +103,7 @@ function analysisFromStory(claim: string, story: any | null, allStories: any[]) 
     primaryReportingOutlet: outlets[0] || "National Press Desk",
     corroboratingSources: outlets.slice(1),
     evidenceTrail: evidence || story.verifiableConsensus || story.title,
-    divergence: disagreements.length ? disagreements.join(" ") : (story.narrativeLandscape || "Consensus confirmed across major reporting outlets."),
+    divergence: disagreements.length ? disagreements.join(" ") : (story.narrativeLandscape || "Desks largely align on the core event."),
     secondarySources: (story.perspectives || []).slice(0, 6).map((p: any) => ({
       publisher: p.source,
       headline: p.title,
@@ -422,14 +428,14 @@ router.get("/:id", async (req, res) => {
           const dbMod = await import("../../utils/db");
           const db = await (dbMod as any).default;
           await db.run("DELETE FROM timeline_events WHERE storyId = ?", [payload.id]);
-          await saveNewsData([payload], []);
+          await saveNewsData([applyStoryHonesty(payload)], []);
         } catch (persistErr) {
           console.warn("enrich persist skipped:", persistErr);
         }
       }
     }
 
-    res.json({ success: true, story: payload });
+    res.json({ success: true, story: applyStoryHonesty(payload) });
   } catch (err) {
     console.error("API /api/news/:id Error:", err);
     res.status(500).json({ success: false, error: "Internal Server Error" });
@@ -545,3 +551,4 @@ Editorial Directives:
 });
 
 export default router;
+
