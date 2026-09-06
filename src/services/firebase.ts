@@ -1,7 +1,8 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { 
   getAuth, 
-  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult, 
   GoogleAuthProvider, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -44,8 +45,27 @@ const googleProvider = new GoogleAuthProvider();
 
 // Authentication Helpers
 export async function loginWithGoogle(): Promise<User> {
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  // Redirect is more reliable than popup on Cloud Run / cross-origin hosts.
+  await signInWithRedirect(auth, googleProvider);
+  // Page navigates away; callers should not expect a returned user here.
+  throw new Error("Redirecting to Google sign-in...");
+}
+
+/** Complete Google redirect sign-in after return. Call once on app load. */
+export async function completeGoogleRedirect(): Promise<User | null> {
+  const result = await getRedirectResult(auth);
+  return result?.user ?? null;
+}
+
+/** Format Firebase Auth errors for UI (code + message). */
+export function formatAuthError(err: unknown): string {
+  const e = err as { code?: string; message?: string };
+  const code = e?.code ? String(e.code) : "";
+  let message = e?.message ? String(e.message) : "Authentication failed.";
+  message = message.replace(/^Firebase:\s*/i, "").replace(/\s*\([^\)]*\)\.?\s*$/, "").trim();
+  if (code && message) return code + ": " + message;
+  if (code) return code;
+  return message || "Authentication failed.";
 }
 
 export async function loginWithEmail(email: string, pass: string): Promise<User> {
@@ -66,7 +86,6 @@ export async function loginAnonymously(): Promise<User> {
 export async function logoutUser(): Promise<void> {
   await signOut(auth);
 }
-
 // User-Isolated Firestore Document Storage Helpers
 // Governed by firestore.rules: match /users/{userId}/bookmarks/{bookmarkId}
 

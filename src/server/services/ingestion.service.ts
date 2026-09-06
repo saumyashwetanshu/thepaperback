@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import crypto from "crypto";
 import dbPromise from "../../utils/db";
 import { 
@@ -38,6 +38,7 @@ import { RSS_FEEDS, fetchRssFeed, isOpinionOutlet, RawArticle, fetchAllSources }
 import { extractArticleContent } from "./ingestion/extractor";
 import { detectLanguage } from "./nlp/language.service";
 import { extractTemporalSignals } from "./nlp/temporal.service";
+import { applyStoryHonesty, applyStoriesHonesty, matchPerspectiveAi, sanitizeWhatHappened } from "./honesty.service";
 
 async function getAi() {
   // Prefer Secret Manager / env via secrets.service (local .env still works).
@@ -352,16 +353,16 @@ ${sanitizeForPrompt(String(c.content || "").slice(0, 8000), 8000)}`;
 
       if (cachedAi && cachedAi.summary) {
         console.log(`[ai] Cache hit for story cluster ${index + 1} (${clusterHash.slice(0, 8)})`);
-        story.description = cachedAi.summary;
+        story.description = sanitizeWhatHappened(cachedAi.summary, extractedMembers.map((x: any) => String(x.content || "")), story.title);
         if (cachedAi.verifiableConsensus) story.verifiableConsensus = cachedAi.verifiableConsensus;
         if (cachedAi.narrativeLandscape) story.narrativeLandscape = cachedAi.narrativeLandscape;
         if (cachedAi.narrativeDetails) story.narrativeDetails = cachedAi.narrativeDetails;
         if (Array.isArray(cachedAi.timeline) && cachedAi.timeline.length > 0) {
-          story.timeline = cachedAi.timeline.map((t: any) => ({ ...t, date: String(t.date || "") }));
+          story.timeline = cachedAi.timeline.map((t: any) => ({ ...t, date: String(t.date || "") })).sort((a: any, b: any) => { const da = Date.parse(a.date); const db = Date.parse(b.date); if (isNaN(da) || isNaN(db)) return 0; return da - db; });
         }
         if (Array.isArray(cachedAi.perspectives) && cachedAi.perspectives.length > 0) {
           story.perspectives = story.perspectives.map((p: any) => {
-            const aiPersp = cachedAi.perspectives.find((ap: any) => ap.source === p.source);
+            const aiPersp = matchPerspectiveAi(cachedAi.perspectives, p);
             return aiPersp ? { ...p, ...aiPersp } : p;
           });
         }
@@ -382,6 +383,7 @@ TRUTH RULES (non-negotiable):
 - NEVER invent facts, numbers, quotes, desks, places, or timelines not present in the provided excerpts.
 - If evidence is thin: say so, write NEEDS CONTEXT, or omit the claim â€” do NOT fill gaps with model knowledge.
 - Do not treat "Shared vocabulary note" as verified facts; it is token overlap only.
+- summary (What Happened) must be a plain news lead about THIS event only. Ban phrases about N platforms/desks/outlets/newsrooms, and ban openers like Corroborated/Collaborated/Cross-verified/Reporting across.
 
 Strict Editorial Directives:
 1. Objectivity: Present unvarnished, factual truth. Avoid partisan framing or speculation.
@@ -404,7 +406,7 @@ ${context}`;
             properties: {
               summary: {
                 type: "STRING",
-                description: "A highly condensed, factual briefing of what happened (1-2 punchy paragraphs, max 100 words). Strictly objective and forensic."
+                description: "Plain 1-3 sentence news lead of THIS exact event from the excerpts only. State who/what/where/when. NEVER mention how many outlets, desks, platforms, or newsrooms covered it. NEVER start with Corroborated/Collaborated/Cross-verified/Across N. Max 100 words."
               },
               verifiableConsensus: {
                 type: "STRING",
@@ -441,13 +443,14 @@ ${context}`;
                   type: "OBJECT",
                   properties: {
                     source: { type: "STRING" },
+                    title: { type: "STRING" },
                     bias: { type: "STRING" },
                     sourceIntegrity: { type: "STRING" },
                     confidenceScore: { type: "INTEGER" },
                     narrativeSummary: { type: "STRING" },
                     framingLens: { type: "STRING" }
                   },
-                  required: ["source", "narrativeSummary", "framingLens"]
+                  required: ["source", "title", "narrativeSummary", "framingLens"]
                 }
               }
             },
@@ -463,16 +466,16 @@ ${context}`;
         if (text.endsWith("```")) text = text.substring(0, text.length - 3);
 
         const parsed = JSON.parse(text);
-        if (parsed.summary) story.description = parsed.summary;
+        if (parsed.summary) { const _bodies = (typeof extractedMembers !== "undefined" ? extractedMembers : (typeof extracted !== "undefined" ? extracted : [])).map((x: any) => String(x?.content || "")); story.description = sanitizeWhatHappened(parsed.summary, _bodies, story.title); }
         if (parsed.verifiableConsensus) story.verifiableConsensus = parsed.verifiableConsensus;
         if (parsed.narrativeLandscape) story.narrativeLandscape = parsed.narrativeLandscape;
         if (parsed.narrativeDetails) story.narrativeDetails = parsed.narrativeDetails;
         if (parsed.timeline && Array.isArray(parsed.timeline) && parsed.timeline.length > 0) {
-          story.timeline = parsed.timeline.map((t: any) => ({ ...t, date: String(t.date || "") }));
+          story.timeline = parsed.timeline.map((t: any) => ({ ...t, date: String(t.date || "") })).sort((a: any, b: any) => { const da = Date.parse(a.date); const db = Date.parse(b.date); if (isNaN(da) || isNaN(db)) return 0; return da - db; });
         }
         if (parsed.perspectives && Array.isArray(parsed.perspectives)) {
           story.perspectives = story.perspectives.map((p: any) => {
-            const aiPersp = parsed.perspectives.find((ap: any) => ap.source === p.source);
+            const aiPersp = matchPerspectiveAi(parsed.perspectives, p);
             if (aiPersp) {
               return { ...p, ...aiPersp };
             }
@@ -637,6 +640,7 @@ TRUTH RULES (non-negotiable):
 - ONLY use facts present in the Article Content blocks below.
 - NEVER invent facts, numbers, quotes, desks, places, or timelines not present in the provided excerpts.
 - If evidence is thin: say so / NEEDS CONTEXT / omit the claim â€” do NOT fill with model knowledge.
+- summary (What Happened) must be a plain news lead about THIS event only. Ban phrases about N platforms/desks/outlets/newsrooms, and ban openers like Corroborated/Collaborated/Cross-verified/Reporting across.
 
 Strict Editorial Directives:
 1. Objectivity: Present unvarnished, factual truth. Avoid partisan framing.
@@ -666,10 +670,11 @@ ${context}`;
                   type: "OBJECT",
                   properties: {
                     source: { type: "STRING" },
+                    title: { type: "STRING" },
                     narrativeSummary: { type: "STRING" },
                     framingLens: { type: "STRING" }
                   },
-                  required: ["source", "narrativeSummary"]
+                  required: ["source", "title", "narrativeSummary"]
                 }
               },
               timeline: {
@@ -697,7 +702,7 @@ ${context}`;
         if (text.startsWith("```")) text = text.substring(3);
         if (text.endsWith("```")) text = text.substring(0, text.length - 3);
         const parsed = JSON.parse(text);
-        if (parsed.summary) story.description = parsed.summary;
+        if (parsed.summary) { const _bodies = (typeof extractedMembers !== "undefined" ? extractedMembers : (typeof extracted !== "undefined" ? extracted : [])).map((x: any) => String(x?.content || "")); story.description = sanitizeWhatHappened(parsed.summary, _bodies, story.title); }
         if (parsed.verifiableConsensus) {
           const vc = String(parsed.verifiableConsensus).trim();
           const bad = /^(words in common|corroborated facts|words that appeared in several articles)/i.test(vc);
@@ -705,11 +710,11 @@ ${context}`;
         }
         if (parsed.narrativeLandscape) story.narrativeLandscape = parsed.narrativeLandscape;
         if (Array.isArray(parsed.timeline) && parsed.timeline.length > 0) {
-          story.timeline = parsed.timeline.map((t: any) => ({ ...t, date: String(t.date || "") }));
+          story.timeline = parsed.timeline.map((t: any) => ({ ...t, date: String(t.date || "") })).sort((a: any, b: any) => { const da = Date.parse(a.date); const db = Date.parse(b.date); if (isNaN(da) || isNaN(db)) return 0; return da - db; });
         }
         if (Array.isArray(parsed.perspectives)) {
           story.perspectives = story.perspectives.map((p: any) => {
-            const aiPersp = parsed.perspectives.find((ap: any) => ap.source === p.source);
+            const aiPersp = matchPerspectiveAi(parsed.perspectives, p);
             return aiPersp ? { ...p, ...aiPersp, content: p.content, extractionStatus: p.extractionStatus } : p;
           });
         }
@@ -728,7 +733,7 @@ ${context}`;
     if (!existingDesc || existingDesc.length < 40) {
       const first = bodies[0] || "";
       const paras = first.split(/\n+/).map((t) => t.trim()).filter((t) => t.length > 40);
-      story.description = (paras.slice(0, 2).join(" ") || first).slice(0, 1200);
+      story.description = sanitizeWhatHappened((paras.slice(0, 2).join(" ") || first).slice(0, 1200), bodies, story.title);
     }
     if (!existingConsensus || existingConsensus.length < 40 || consensusIsKeywordList) {
       const facts = fallbackFactsFromBodies(bodies);
@@ -1256,7 +1261,8 @@ export async function getLiveNews(): Promise<{ stories: NewsStory[]; wire: LiveW
       };
     });
 
-    await saveNewsData(stories, wire);
+    const honestStories = applyStoriesHonesty(stories);
+    await saveNewsData(honestStories, wire);
     console.log(`Background Ingestion: Completed local pipeline for ${stories.length} stories.`);
     return { stories, wire, homepage_payload };
   } catch (err) {
@@ -1593,4 +1599,3 @@ Respond strictly in this JSON format:
 function runLiveFactCheckFeed() {
   console.log("Fact-check live feed uses POST /api/news/fact-check against live RSS.");
 }
-

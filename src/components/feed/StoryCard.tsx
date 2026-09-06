@@ -87,7 +87,7 @@ export function StoryCard({ story }: StoryCardProps) {
             <div className="flex items-center gap-2 pt-2 text-[11px] font-sans text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-800/60 mt-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
               <span className="font-semibold text-gray-700 dark:text-gray-300">
-                {sourcesCount} Desks Corroborated
+                {sourcesCount} {sourcesCount === 1 ? "Desk" : "Desks"} Indexed
               </span>
               {story.perspectives?.[0]?.framingLens && (
                 <>
