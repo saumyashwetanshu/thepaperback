@@ -49,7 +49,7 @@ export function HeroStory({ story }: HeroStoryProps) {
             {(story.perspectives?.length || sourcesCount > 1) && (
               <div className="flex flex-wrap items-center gap-2 text-[11px] font-sans font-medium tracking-wider text-gray-500 dark:text-gray-400 mt-3 pt-2">
                 <span className="text-black dark:text-white font-bold uppercase">
-                  {sourcesCount} {sourcesCount === 1 ? "Desk" : "Desks"} Cross-Examined:
+                  {sourcesCount} {sourcesCount === 1 ? "Desk" : "Desks"} Indexed:
                 </span>
                 <span>
                   {story.perspectives?.length ? story.perspectives.slice(0, 4).map(p => p.source).filter(Boolean).join(" • ") : story.primaryReportingOutlet || "National Wire"}
@@ -102,7 +102,7 @@ export function HeroStory({ story }: HeroStoryProps) {
               <span className="uppercase tracking-wider text-gray-300">
                 {story.primaryReportingOutlet || "National Desk"}
               </span>
-              <span>{sourcesCount} Outlets Corroborated</span>
+              <span>{sourcesCount} {sourcesCount === 1 ? "Desk" : "Desks"} Indexed</span>
             </div>
           </div>
         )}
