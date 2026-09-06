@@ -3,6 +3,25 @@ import { NewsStory, LanguageCode, Perspective, TimelineEvent, NarrativeLandscape
 // In-memory client-side translation cache
 const clientTranslationCache = new Map<string, string>();
 
+export function hasIndicScript(str?: string): boolean {
+  return !!str && /[\u0900-\u097F\u0980-\u09FF\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]/.test(str);
+}
+
+/** True when text should be translated into targetLang for the UI toggle. */
+export function textNeedsTranslation(text: string, targetLang: LanguageCode): boolean {
+  const t = String(text || "").trim();
+  if (!t || t.length < 2) return false;
+  if (targetLang === "en") return hasIndicScript(t);
+  if (targetLang === "hi") return !hasIndicScript(t) && /[A-Za-z]/.test(t);
+  // other Indic targets: translate from English/Latin or mismatched scripts
+  if (["bn", "ta", "te", "mr", "kn", "ml"].includes(targetLang)) {
+    // Translate Latin/English into the selected Indic language; leave matching script alone when possible.
+    return /[A-Za-z]{3,}/.test(t);
+  }
+  return false;
+}
+
+
 interface TranslationPattern {
   verifiablePrefix: string;
   crossVerifiedAcross: string;
@@ -245,7 +264,8 @@ const TRANSLATION_PATTERNS: Record<LanguageCode, TranslationPattern> = {
  * Translates a single text string via the API with caching
  */
 export async function translateTextOnline(text: string, targetLang: LanguageCode, signal?: AbortSignal): Promise<string> {
-  if (!text || targetLang === "en") return text;
+  if (!text) return text;
+  if (!textNeedsTranslation(text, targetLang)) return text;
   const cacheKey = `${targetLang}:${text.trim()}`;
   if (clientTranslationCache.has(cacheKey)) {
     return clientTranslationCache.get(cacheKey)!;
@@ -276,12 +296,16 @@ export async function translateTextOnline(text: string, targetLang: LanguageCode
  * Translates an array of texts in a single batch
  */
 export async function translateTextsBatch(texts: string[], targetLang: LanguageCode, signal?: AbortSignal): Promise<string[]> {
-  if (!texts.length || targetLang === "en") return texts;
+  if (!texts.length) return texts;
 
   const uncached: { text: string; index: number }[] = [];
   const results: string[] = new Array(texts.length);
 
   texts.forEach((text, i) => {
+    if (!textNeedsTranslation(text, targetLang)) {
+      results[i] = text;
+      return;
+    }
     const cacheKey = `${targetLang}:${text.trim()}`;
     if (clientTranslationCache.has(cacheKey)) {
       results[i] = clientTranslationCache.get(cacheKey)!;
@@ -370,27 +394,7 @@ export function getContextualStory(story: NewsStory, lang: LanguageCode): NewsSt
   // Case 1: English requested (Default platform mode)
   if (lang === "en") {
     // Check curated mapping first
-    const curated = HINDI_TO_ENGLISH_MAP[story.id];
-    if (curated) {
-      const updatedPerspectives = (story.perspectives || []).map(p => {
-        const curatedPersp = curated.perspectives && curated.perspectives[p.source];
-        return {
-          ...p,
-          title: curatedPersp?.title || (hasDevanagari(p.title) ? curated.title : p.title),
-          narrativeSummary: curatedPersp?.summary || (hasDevanagari(p.narrativeSummary) ? curated.description : p.narrativeSummary)
-        };
-      });
-
-      return {
-        ...story,
-        title: curated.title,
-        description: curated.description,
-        summary: curated.description,
-        verifiableConsensus: curated.consensus.join('\n'),
-        sharedFactualGround: JSON.stringify(curated.consensus),
-        perspectives: updatedPerspectives
-      };
-    }
+    // Curated demo map disabled: stale story IDs were overwriting live dossiers with unrelated summaries.
 
     // Check if title has a curated English headline
     let translatedTitle = story.title;
@@ -409,12 +413,16 @@ export function getContextualStory(story: NewsStory, lang: LanguageCode): NewsSt
       
       let englishDesc = story.description;
       if (hasDevanagari(englishDesc)) {
-        englishDesc = `Verified news dispatch covering "${englishTitle}". Independent regional reporting across ${sources || "national desks"} documents statutory announcements, verified events, and on-the-ground developments.`;
+        // Never invent "across N desks/platforms" fluff — keep title lead only until real English body exists.
+        englishDesc = `${englishTitle}. Coverage is still being translated from regional-language reporting; open desk cards below for the source articles.`;
       }
 
       let englishConsensus = story.verifiableConsensus;
       if (hasDevanagari(englishConsensus)) {
-        englishConsensus = `${p.verifiablePrefix} ${englishTitle}.\n${p.crossVerifiedAcross} ${sources || "indexed desks"}.\nOfficial sources and participating stakeholders documented key operational facts without unresolved contradictions.`;
+        // Prefer real English consensus from API; do not fabricate cross-desk corroboration copy.
+        englishConsensus = story.description && !hasDevanagari(story.description)
+          ? String(story.description).split(/(?<=\.)\s+/).slice(0, 4).join('\n')
+          : `Key points for "${englishTitle}" are in the source articles below.`;
       }
 
       const cleanPerspectives = (story.perspectives || []).map(item => {
@@ -470,64 +478,11 @@ export function getContextualStory(story: NewsStory, lang: LanguageCode): NewsSt
     }
   }
 
-  const p = TRANSLATION_PATTERNS[lang] || TRANSLATION_PATTERNS.en;
-  const sources = Array.from(new Set((story.perspectives || []).map(p => p.source))).slice(0, 4).join(", ");
-
-  // Check if headline is in translation cache
-  const cachedTitle = clientTranslationCache.get(`${lang}:${story.title.trim()}`) || story.title;
-  const cachedConsensus = clientTranslationCache.get(`${lang}:${story.verifiableConsensus?.trim()}`);
-
-  const verifiableConsensus = cachedConsensus || `${p.verifiablePrefix} ${cachedTitle}. ${p.crossVerifiedAcross} ${sources}.`;
-
-  const narrativeDetails: NarrativeLandscapeDetails = {
-    leftNarrative: p.leftNarrative,
-    centerNarrative: p.centerNarrative,
-    rightNarrative: p.rightNarrative
-  };
-
-  const narrativeLandscape = `${p.leftNarrative} ${p.centerNarrative} ${p.rightNarrative}`;
-
-  const timeline: TimelineEvent[] = (story.timeline || []).map((t, idx) => {
-    const titles = [p.timelineStep1, p.timelineStep2, p.timelineStep3, p.timelineStep4];
-    const sourceName = (story.perspectives && story.perspectives[idx]?.source) || (idx === 0 ? "The Hindu" : idx === 1 ? "NDTV" : idx === 2 ? "The Times of India" : "ThePrint");
-    
-    let desc = t.description;
-    if (idx === 0) desc = p.timelineDesc1(sourceName, cachedTitle);
-    else if (idx === 1) desc = p.timelineDesc2(sourceName);
-    else if (idx === 2) desc = p.timelineDesc3(sourceName);
-    else if (idx === 3) desc = p.timelineDesc4(story.perspectives?.length || 5);
-
-    return {
-      ...t,
-      title: `${titles[idx] || t.title}: ${sourceName}`,
-      description: desc
-    };
-  });
-
-  const perspectives: Perspective[] = (story.perspectives || []).map((item, idx) => {
-    const isLeft = item.bias === "left" || item.bias === "left-center";
-    const isRight = item.bias === "right" || item.bias === "right-center";
-    const cachedItemTitle = clientTranslationCache.get(`${lang}:${item.title?.trim()}`) || cachedTitle || item.title;
-
-    return {
-      ...item,
-      title: cachedItemTitle,
-      editorialFraming: isLeft ? p.leftFraming : isRight ? p.rightFraming : p.centerFraming,
-      narrativeSummary: p.narrativeSummaryTpl(item.source, cachedItemTitle),
-      framingLens: isLeft ? p.leftNarrative : isRight ? p.rightNarrative : p.centerNarrative,
-      emphasized: isLeft ? p.leftEmphasized : isRight ? p.rightEmphasized : p.centerEmphasized,
-      downplayed: isLeft ? p.leftDownplayed : isRight ? p.rightDownplayed : p.centerDownplayed
-    };
-  });
-
-  return {
-    ...story,
-    title: cachedTitle,
-    verifiableConsensus,
-    narrativeLandscape,
-    narrativeDetails,
-    timeline,
-    perspectives,
-    readerTakeaway: p.readerTakeawayPrefix
-  };
+  // Other languages: never invent corroboration / timeline / framing templates.
+  // Pass the real API story through; only swap a cached title if one exists.
+  const cachedTitle = clientTranslationCache.get(`${lang}:${story.title.trim()}`);
+  if (cachedTitle) {
+    return { ...story, title: cachedTitle };
+  }
+  return story;
 }
