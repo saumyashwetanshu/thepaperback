@@ -14,6 +14,25 @@ function cleanSourceName(source?: string): string {
     .trim();
 }
 
+
+function sameEventDesk(p: Perspective, storyTitle: string, storyDesc: string): boolean {
+  const title = cleanText(p.title || "");
+  if (!title) return false;
+  if (/this is a real headline|not ai-generated|lorem ipsum/i.test(title)) return false;
+  const stop = new Set("the a an and or of to in on for from with by as at is was were be been being this that those these live breaking exclusive watch update after before about".split(" "));
+  const toks = (s: string) =>
+    s.toLowerCase().split(/[^a-z0-9\u0900-\u097f]+/).filter((w) => w.length > 3 && !stop.has(w));
+  const anchor = toks(`${storyDesc || ""} ${storyTitle || ""}`);
+  if (anchor.length < 2) return true;
+  const desk = toks(`${title} ${cleanText(p.narrativeSummary || p.leadParagraph || "")}`);
+  const aSet = new Set(anchor);
+  const hits = desk.filter((t) => aSet.has(t)).length;
+  const ratio = desk.length ? hits / Math.min(desk.length, 8) : 0;
+  const reverseHits = anchor.filter((t) => new Set(desk).has(t)).length;
+  const rev = reverseHits / Math.min(anchor.length, 10);
+  return ratio >= 0.25 || rev >= 0.25 || hits >= 2;
+}
+
 function cleanText(s?: string): string {
   return decodeHtmlEntities(String(s || ""))
     .replace(/\s+/g, " ")
@@ -94,7 +113,7 @@ function coverageSummary(p: Perspective, headline: string): string | null {
     if (isHeadlineEcho(c, headline, source)) continue;
     if (isKeywordDump(c)) continue;
     if (c.length < 48) continue;
-    const clipped = c.length > 340 ? `${c.slice(0, 337).trim()}…` : c;
+    const clipped = c.length > 340 ? `${c.slice(0, 337).trim()}â€¦` : c;
     if (isHeadlineEcho(clipped, headline, source)) continue;
     return clipped;
   }
@@ -113,7 +132,7 @@ function storedFraming(p: Perspective): string | null {
     .filter(Boolean);
   for (const c of candidates) {
     if (isKeywordDump(c) || isTemplateFraming(c) || !isUsefulProse(c)) continue;
-    return c.length > 280 ? `${c.slice(0, 277).trim()}…` : c;
+    return c.length > 280 ? `${c.slice(0, 277).trim()}â€¦` : c;
   }
   return null;
 }
@@ -255,7 +274,7 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
     language === "en" && wasIndic
       ? "From Hindi"
       : language === "hi" && !wasIndic && /[A-Za-z]{4,}/.test(baseHeadline)
-        ? "अंग्रेज़ी से"
+        ? "à¤…à¤‚à¤—à¥à¤°à¥‡à¤œà¤¼à¥€ à¤¸à¥‡"
         : null;
 
   async function copyLink() {
@@ -295,7 +314,7 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
           </div>
         </div>
 
-        {/* headline — primary */}
+        {/* headline â€” primary */}
         {url ? (
           <a
             href={url}
@@ -311,7 +330,7 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
           </h3>
         )}
 
-        {/* narrative summary — soft paper well */}
+        {/* narrative summary â€” soft paper well */}
         <div className="mt-4">
           <p className="mb-2 text-[10px] font-sans font-semibold uppercase tracking-[0.16em] text-zinc-400 dark:text-zinc-500">
             Narrative summary
@@ -325,12 +344,12 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
               }`}
             >
               {summary ||
-                "No separate summary beyond the headline in our extract — open the original for the full piece."}
+                "No separate summary beyond the headline in our extract â€” open the original for the full piece."}
             </p>
           </div>
         </div>
 
-        {/* framing lens — pull-quote feel */}
+        {/* framing lens â€” pull-quote feel */}
         {faceFraming ? (
           <div className="mt-4 border-l-2 border-rose-500/50 pl-3.5">
             <p className="mb-1.5 text-[10px] font-sans font-semibold uppercase tracking-[0.16em] text-rose-600/80 dark:text-rose-400/90">
@@ -371,7 +390,7 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
                   <div className="flex items-center gap-2.5 py-1">
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-400" />
                     <p className="text-[13.5px] text-zinc-500 dark:text-zinc-400">
-                      Reading the extract for framing and gaps…
+                      Reading the extract for framing and gapsâ€¦
                     </p>
                   </div>
                 ) : null}
@@ -424,11 +443,11 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
               >
                 Read story
                 <span aria-hidden className="text-[11px] opacity-60">
-                  ↗
+                  â†—
                 </span>
               </a>
               <span className="text-zinc-200 dark:text-zinc-700" aria-hidden>
-                ·
+                Â·
               </span>
               <button
                 type="button"
@@ -449,7 +468,7 @@ function DeskCard({ p, storyTitle }: { p: Perspective; storyTitle: string }) {
 
 export function CoverageComparisonMatrix({ story }: { story: NewsStory }) {
   const desks = useMemo(
-    () => uniqueDesks(Array.isArray(story.perspectives) ? story.perspectives : []),
+    () => uniqueDesks((Array.isArray(story.perspectives) ? story.perspectives : []).filter((p) => sameEventDesk(p, story.title, String((story as any).description || (story as any).summary || "")))),
     [story.perspectives]
   );
   if (desks.length < 1) return null;
