@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN npm run build
+RUN mkdir -p .data && npm run build
 
 FROM node:22-alpine AS runner
 
@@ -21,7 +21,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/.data ./.data
+RUN mkdir -p .data
 
 ENV NODE_ENV=production
 ENV PORT=8080
