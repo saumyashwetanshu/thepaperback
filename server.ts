@@ -15,6 +15,7 @@ import { sseClients, broadcastSSE } from "./src/server/services/sse.service";
 import authRoutes from "./src/server/routes/auth.routes";
 import newsRoutes from "./src/server/routes/news.routes";
 import pulseRoutes from "./src/server/routes/pulse.routes";
+import translateRoutes from "./src/server/routes/translate.routes";
 
 // Since we might be running as CJS or ESM depending on environment (tsx vs esbuild)
 let dirname = "";
@@ -181,6 +182,7 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
     app.use("/api/auth", authRoutes);
     app.use("/api/news", newsRoutes);
     app.use("/api/pulse", pulseRoutes);
+    app.use("/api/translate", translateRoutes);
 
     // SSE Endpoint
     app.get("/api/stream", (req, res) => {
